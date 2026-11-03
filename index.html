@@ -673,9 +673,15 @@ const state = {
   selectIndex: 0
 };
 
+const ARMOR_MAX = 100;
+const ARMOR_PICKUP = 45;
+const ACID_RESIST_TIME = 22;
+const ACID_RESIST_MUL = 0.35;   // остаётся 35% урона кислотой
+
 const player = {
   x: WORLD.w / 2, y: WORLD.h / 2, r: 14,
   hp: 100, maxHp: 100,
+  armor: 0, maxArmor: ARMOR_MAX, acidResistT: 0,
   heroId: 'volk', rofMul: 1, dashCdMax: 1.0, dashPower: 1,
   vx: 0, vy: 0, speed: 250,
   aim: 0, moving: false,
@@ -1109,7 +1115,7 @@ function toxicBurst(x, y, radius, dmg){
   }
   const pd = hypot(player.x - x, player.y - y);
   if (pd < radius && state.mode === 'playing'){
-    hurtPlayer(Math.round(10 + 16 * (1 - clamp(pd / radius, 0, 1))));
+    hurtPlayer(Math.round(10 + 16 * (1 - clamp(pd / radius, 0, 1))), 'acid');
   }
   sfx('acid');
 }
@@ -1298,6 +1304,8 @@ function dropLoot(z){
     spawnPickup('weapon', z.x, z.y + 40, locked.length ? pick(locked) : null);
     spawnPickup('grenade', z.x, z.y - 46);
     spawnPickup('fire', z.x + 46, z.y - 46);
+    spawnPickup('armor', z.x - 46, z.y + 46);
+    spawnPickup('acidres', z.x + 46, z.y + 46);
     return;
   }
   const r = Math.random();
@@ -1305,6 +1313,8 @@ function dropLoot(z){
   else if (r < 0.095) spawnPickup('health', z.x, z.y);
   else if (r < 0.12) spawnPickup('grenade', z.x, z.y);
   else if (r < 0.165) spawnPickup('fire', z.x, z.y);
+  else if (r < 0.186) spawnPickup('armor', z.x, z.y);
+  else if (r < 0.204) spawnPickup('acidres', z.x, z.y);
 }
 
 function applyPickup(p){
@@ -1332,6 +1342,23 @@ function applyPickup(p){
     sfx('pickup');
     burstText('ОГНЕННЫЕ ПАТРОНЫ', '#ffb03a');
     floatText(p.x, p.y - 12, '+15 СЕК ОГНЯ', '#ffb03a', 15);
+  } else if (p.type === 'armor'){
+    const before = player.armor;
+    player.armor = Math.min(player.maxArmor, player.armor + ARMOR_PICKUP);
+    const got = Math.round(player.armor - before);
+    sfx('pickup');
+    if (got > 0){
+      burstText('+' + got + ' БРОНИ', '#8fd8ff');
+      floatText(p.x, p.y - 12, '+' + got + ' БРОНЯ', '#8fd8ff', 15);
+    } else {
+      burstText('БРОНЯ УЖЕ ПОЛНА', '#8fd8ff');
+      floatText(p.x, p.y - 12, 'МАКС', '#8fd8ff', 15);
+    }
+  } else if (p.type === 'acidres'){
+    player.acidResistT = Math.min(ACID_RESIST_TIME * 2, player.acidResistT + ACID_RESIST_TIME);
+    sfx('pickup');
+    burstText('ЗАЩИТА ОТ КИСЛОТЫ', '#9cff4a');
+    floatText(p.x, p.y - 12, '−65% КИСЛОТЫ', '#9cff4a', 15);
   } else if (p.type === 'weapon'){
     let chosen = null;
     if (p.weapon && !player.guns[p.weapon].owned) chosen = p.weapon;
@@ -1746,7 +1773,7 @@ function updatePools(dt){
     p.t += dt;
     if (p.harm > 0 && state.mode === 'playing'){
       const rr = p.r * 0.8;
-      if (dist2(player.x, player.y, p.x, p.y) < rr * rr) hurtPlayer(p.harm);
+      if (dist2(player.x, player.y, p.x, p.y) < rr * rr) hurtPlayer(p.harm, 'acid');
     }
     if (p.life <= 0) pools.splice(i, 1);
   }
@@ -1955,6 +1982,8 @@ function startGame(heroId){
   player.x = WORLD.w / 2;
   player.y = WORLD.h / 2;
   player.hp = player.maxHp;
+  player.armor = 0;
+  player.acidResistT = 0;
   player.vx = player.vy = 0;
   player.aim = 0;
   player.inv = 0;
@@ -2163,6 +2192,8 @@ function clearWave(){
   spawnPickup('ammo', player.x, player.y);
   spawnPickup('grenade', player.x, player.y);
   if (state.wave % 2 === 0) spawnPickup('fire', player.x, player.y);
+  if (state.wave % 3 === 0) spawnPickup('armor', player.x, player.y);
+  if (state.wave % 4 === 0) spawnPickup('acidres', player.x, player.y);
   sfx('wave');
 }
 
@@ -2346,6 +2377,7 @@ function updatePlayer(dt){
   p.hurtT = Math.max(0, p.hurtT - dt);
   p.grenadeCd = Math.max(0, p.grenadeCd - dt);
   p.fireT = Math.max(0, p.fireT - dt);
+  p.acidResistT = Math.max(0, p.acidResistT - dt);
   if (p.dashT > 0) p.dashT = Math.max(0, p.dashT - dt);
 
   if (p.reloadT > 0){
@@ -2420,9 +2452,56 @@ function aimAssist(){
   if (bestA !== null) player.aim = bestA;
 }
 
-function hurtPlayer(dmg){
+function hurtPlayer(dmg, kind){
   if (player.inv > 0 || state.mode !== 'playing') return;
-  player.hp -= dmg;
+  let left = dmg;
+
+  // резист от кислоты: режем урон до брони, чтобы она дольше держалась
+  if (kind === 'acid' && player.acidResistT > 0) left *= ACID_RESIST_MUL;
+
+  // броня принимает урон на себя, пока не кончится
+  let absorbed = 0;
+  if (player.armor > 0 && left > 0){
+    absorbed = Math.min(player.armor, left);
+    player.armor = Math.max(0, player.armor - absorbed);
+    left -= absorbed;
+  }
+
+  if (absorbed > 0){
+    for (let i = 0; i < 7; i++){
+      const a = rand(0, TAU), sp = rand(30, 150);
+      addParticle({
+        x: player.x, y: player.y,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life: rand(0.15, 0.4), max: 0.4, size: rand(1.2, 2.8),
+        color: '#8fd8ff', drag: 0.004, grav: 0, kind: 'spark'
+      });
+    }
+    addParticle({
+      x: player.x, y: player.y, vx: 0, vy: 0, life: 0.22, max: 0.22,
+      size: player.r * 2.2, color: '#8fd8ff', drag: 0, grav: 0, kind: 'ring'
+    });
+    sfx('hit');
+    if (player.armor <= 0){
+      floatText(player.x, player.y - 26, 'БРОНЯ ПРОБИТА', '#8fd8ff', 13);
+    }
+  }
+
+  // удар полностью погашен бронёй
+  if (left <= 0.5){
+    player.inv = 0.28;
+    state.shake = Math.min(14, state.shake + 3);
+    return;
+  }
+
+  if (kind === 'acid' && player.acidResistT > 0){
+    addParticle({
+      x: player.x, y: player.y, vx: 0, vy: 0, life: 0.3, max: 0.3,
+      size: player.r * 2.6, color: '#9cff4a', drag: 0, grav: 0, kind: 'ring'
+    });
+  }
+
+  player.hp -= left;
   player.inv = 0.5;
   player.hurtT = 0.7;
   state.shake = Math.min(26, state.shake + 6);
@@ -2985,7 +3064,7 @@ function updateEnemyBullets(dt){
       continue;
     }
     if (dist2(b.x, b.y, player.x, player.y) < (b.r + player.r) * (b.r + player.r)){
-      hurtPlayer(b.dmg || 12);
+      hurtPlayer(b.dmg || 12, 'acid');
       stampBlood(b.x, b.y, 6, 'rgba(60,110,20,', 1.4);
       if (b.leavePool) addPool(b.x, b.y, 30, '74,140,22', 4);
       enemyBullets.splice(i, 1);
@@ -3638,6 +3717,31 @@ function drawPlayer(){
     ctx.strokeStyle = '#8fe6d4';
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(0, 0, p.r + 7, 0, TAU); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // броня: холодное кольцо вокруг бойца
+  if (p.armor > 0){
+    ctx.globalAlpha = 0.34 + Math.sin(p.now * 4.2) * 0.12;
+    ctx.strokeStyle = '#8fd8ff';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.arc(0, 0, p.r + 5.5, 0, TAU); ctx.stroke();
+    const hp = p.armor / p.maxArmor;
+    ctx.globalAlpha = 0.85;
+    ctx.strokeStyle = '#c8f0ff';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.arc(0, 0, p.r + 5.5, -Math.PI / 2, -Math.PI / 2 + TAU * hp); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // кислотостойкость: зелёная пунктирная аура
+  if (p.acidResistT > 0){
+    ctx.globalAlpha = 0.22 + Math.sin(p.now * 5) * 0.08;
+    ctx.strokeStyle = '#9cff4a';
+    ctx.lineWidth = 1.3;
+    ctx.setLineDash([4, 5]);
+    ctx.beginPath(); ctx.arc(0, 0, p.r + 10, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
     ctx.globalAlpha = 1;
   }
 
@@ -4513,7 +4617,7 @@ function drawFlashes(){
 function drawPickups(){
   for (const p of pickups){
     const bob = Math.sin(p.t) * 3;
-    const col = p.type === 'health' ? '#5fe07a' : p.type === 'ammo' ? '#ffc85a' : p.type === 'grenade' ? '#ff7a3a' : p.type === 'fire' ? '#ffdf3a' : '#6fd2ff';
+    const col = p.type === 'health' ? '#5fe07a' : p.type === 'ammo' ? '#ffc85a' : p.type === 'grenade' ? '#ff7a3a' : p.type === 'fire' ? '#ffdf3a' : p.type === 'armor' ? '#8fd8ff' : p.type === 'acidres' ? '#9cff4a' : '#6fd2ff';
     ctx.save();
     ctx.translate(p.x, p.y + bob);
 
@@ -4562,6 +4666,45 @@ function drawPickups(){
       ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#fff2a0';
       ctx.fillRect(-1.3, -5.5, 2.6, 6);
+    } else if (p.type === 'armor'){
+      // бронепластина-щит
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(0, -8.5);
+      ctx.lineTo(7.5, -4.5);
+      ctx.lineTo(6.5, 2);
+      ctx.lineTo(0, 8.5);
+      ctx.lineTo(-6.5, 2);
+      ctx.lineTo(-7.5, -4.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(10,22,26,0.82)';
+      ctx.beginPath();
+      ctx.moveTo(0, -4.5);
+      ctx.lineTo(3.4, -2.4);
+      ctx.lineTo(3, 1);
+      ctx.lineTo(0, 3.8);
+      ctx.lineTo(-3, 1);
+      ctx.lineTo(-3.4, -2.4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(-4.5, -4.2); ctx.lineTo(-1.6, -5.8); ctx.stroke();
+    } else if (p.type === 'acidres'){
+      // капля-антидот
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(0, -8.5);
+      ctx.bezierCurveTo(4.5, -2.5, 7, 1.5, 4.5, 5);
+      ctx.bezierCurveTo(2.5, 8.2, -2.5, 8.2, -4.5, 5);
+      ctx.bezierCurveTo(-7, 1.5, -4.5, -2.5, 0, -8.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(12,28,8,0.6)';
+      ctx.beginPath(); ctx.arc(0, 2.4, 3.4, 0, TAU); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.78)';
+      ctx.beginPath(); ctx.arc(-1.6, 1.4, 1.1, 0, TAU); ctx.fill();
     } else {
       ctx.fillStyle = col;
       ctx.fillRect(-8, -2, 14, 4);
@@ -4870,7 +5013,7 @@ function drawMiniMap(){
     ctx.fillRect(ox + w.x * s, oy + w.y * s, Math.max(1, w.w * s), Math.max(1, w.h * s));
   }
   for (const p of pickups){
-    ctx.fillStyle = p.type === 'health' ? '#5fe07a' : p.type === 'ammo' ? '#ffc85a' : p.type === 'grenade' ? '#ff7a3a' : p.type === 'fire' ? '#ffdf3a' : '#6fd2ff';
+    ctx.fillStyle = p.type === 'health' ? '#5fe07a' : p.type === 'ammo' ? '#ffc85a' : p.type === 'grenade' ? '#ff7a3a' : p.type === 'fire' ? '#ffdf3a' : p.type === 'armor' ? '#8fd8ff' : p.type === 'acidres' ? '#9cff4a' : '#6fd2ff';
     ctx.fillRect(ox + p.x * s - 1, oy + p.y * s - 1, 2.5, 2.5);
   }
   for (const z of zombies){
@@ -4980,6 +5123,28 @@ function drawHUD(){
   txt('РЫВОК', hx + 232 * ui, hy + 73 * ui, Math.max(9, 9 * ui), '#98a3a3', 'left', 700);
   bar(hx + 232 * ui, hy + 78 * ui, 84 * ui, 5 * ui, clamp(dashPct, 0, 1), '#7fd8c8');
 
+  // ---------- баффы: броня и кислотостойкость ----------
+  let buffY = hy - 8 * ui;
+  if (player.acidResistT > 0){
+    const bh = 28 * ui;
+    buffY -= bh;
+    panel(hx, buffY, hw, bh, 'rgba(9,20,8,0.82)', 'rgba(156,255,74,0.42)');
+    txt('ЗАЩИТА ОТ КИСЛОТЫ', hx + 12 * ui, buffY + 18 * ui, Math.max(9, 9.5 * ui), '#9cff4a', 'left', 800);
+    txt('−65% · ' + Math.ceil(player.acidResistT) + ' с', hx + hw - 12 * ui, buffY + 18 * ui, Math.max(9, 9.5 * ui), '#d6ffb0', 'right', 700);
+    bar(hx + 12 * ui, buffY + bh - 5 * ui, hw - 24 * ui, 3 * ui,
+      clamp(player.acidResistT / (ACID_RESIST_TIME * 2), 0, 1), '#9cff4a', 'rgba(0,0,0,0.45)');
+    buffY -= 6 * ui;
+  }
+  if (player.armor > 0){
+    const bh = 28 * ui;
+    buffY -= bh;
+    panel(hx, buffY, hw, bh, 'rgba(8,16,20,0.82)', 'rgba(143,216,255,0.42)');
+    txt('БРОНЯ', hx + 12 * ui, buffY + 18 * ui, Math.max(9, 9.5 * ui), '#8fd8ff', 'left', 800);
+    txt(Math.ceil(player.armor) + ' / ' + player.maxArmor, hx + hw - 12 * ui, buffY + 18 * ui, Math.max(9, 9.5 * ui), '#d8f2ff', 'right', 700);
+    bar(hx + 12 * ui, buffY + bh - 5 * ui, hw - 24 * ui, 3 * ui,
+      clamp(player.armor / player.maxArmor, 0, 1), '#8fd8ff', 'rgba(0,0,0,0.45)');
+  }
+
   // ---------- низ справа: оружие ----------
   const ww = 330 * ui, wh = 92 * ui;
   const wx = cw - pad - ww, wy = ch - pad - wh;
@@ -5085,6 +5250,23 @@ function drawMobileHUD(){
   txt('HP ' + Math.ceil(player.hp), padL + 2 * m, hbY + 19 * m, 8 * m, '#cfd8d4', 'left', 700);
   txt(hero.name, padL + pw - 2 * m, hbY + 19 * m, 8 * m, hero.color, 'right', 800);
 
+  // броня / кислотостойкость — строка статусов под HP
+  const stY = hbY + 32 * m;
+  const chipW = pw * 0.46;
+  const hasArmor = player.armor > 0;
+  const hasAcid = player.acidResistT > 0;
+  if (hasArmor){
+    txt('БРОНЯ ' + Math.ceil(player.armor), padL + 2 * m, stY, Math.max(8, 7.6 * m), '#8fd8ff', 'left', 800);
+    bar(padL, stY + 3 * m, chipW, 3 * m, clamp(player.armor / player.maxArmor, 0, 1), '#8fd8ff', 'rgba(0,0,0,0.55)');
+  }
+  if (hasAcid){
+    txt('КИСЛОТА ' + Math.ceil(player.acidResistT) + 'с', padL + pw - 2 * m, stY,
+      Math.max(8, 7.6 * m), '#9cff4a', 'right', 800);
+    bar(padL + pw - chipW, stY + 3 * m, chipW, 3 * m,
+      clamp(player.acidResistT / (ACID_RESIST_TIME * 2), 0, 1), '#9cff4a', 'rgba(0,0,0,0.55)');
+  }
+  const statusExtra = (hasArmor || hasAcid) ? 18 * m : 0;
+
   // гранаты — иконки справа под панелью оружия
   let gx = cw - padR - 6 * m;
   for (let i = 0; i < player.maxGrenades; i++){
@@ -5103,7 +5285,7 @@ function drawMobileHUD(){
   const boss = zombies.find(z => z.type === 'boss' && !z.dead);
   if (boss){
     const bw = cw - padL - padR;
-    const by = padT + th + 44 * m;
+    const by = padT + th + (44 + statusExtra / m) * m;
     const accent = boss.bossAccent || '#ff8a5a';
     txt(boss.bossName || 'БОСС', padL, by - 4 * m, 8.5 * m, accent, 'left', 800);
     txt(Math.max(0, Math.ceil(boss.hp)) + ' HP', cw - padR, by - 4 * m, 8 * m, '#c9b79a', 'right', 700);
@@ -5115,7 +5297,7 @@ function drawMobileHUD(){
     const a = clamp(state.unlockT, 0, 1);
     ctx.save();
     ctx.globalAlpha = a;
-    const uy = padT + th + (boss ? 62 : 40) * m;
+    const uy = padT + th + (boss ? 62 : 40) * m + statusExtra;
     txt(state.unlockText, safeCx(), uy, 8 * m, '#ffd06a', 'center', 700);
     ctx.restore();
   }
@@ -6166,7 +6348,7 @@ cam.y = clamp(WORLD.h / 2 - viewH() / 2, 0, Math.max(0, WORLD.h - viewH()));
 requestAnimationFrame(frame);
 
 // отладочный автозапуск: index.html?auto
-window.__ds = { player, state, zombies, bullets, enemyBullets, pickups, gibs, pools, texts, particles, shockwaves, grenades, mines, cam, view, screenBlood, SAFE, safeW, safeCx, startGame, openSelect, selectHero, cycleSelect, heroCardRect, heroCardAt, selectTabRect, mobileSelectLayout, mobileLayout, touch, viewW, viewH, zoom: () => zoom, renderScale: () => renderScale, setRenderScale, dpr: () => dpr, IS_MOBILE, shoot, dash, update, beginWave, spawnZombie, spawnPickup, applyPickup, dropLoot, hurtPlayer, throwGrenade, explode, damageZombie, killZombie, pickType, bossForWave, BOSS_LIST, ENEMY_SPECS, ENEMY_NAMES, ENEMY_UNLOCKS, WEAPONS, GUN_ORDER, HEROES, HERO_ORDER, FONT, sfx, switchWeapon, rocketBoom, mineBoom, bushes, walls, toxicBurst, bomberBoom, shootAcid, findFreeSpot, pointInWall };
+window.__ds = { player, state, zombies, bullets, enemyBullets, pickups, gibs, pools, texts, particles, shockwaves, grenades, mines, cam, view, screenBlood, SAFE, safeW, safeCx, startGame, openSelect, selectHero, cycleSelect, heroCardRect, heroCardAt, selectTabRect, mobileSelectLayout, mobileLayout, touch, viewW, viewH, zoom: () => zoom, renderScale: () => renderScale, setRenderScale, dpr: () => dpr, IS_MOBILE, shoot, dash, update, beginWave, spawnZombie, spawnPickup, applyPickup, dropLoot, hurtPlayer, throwGrenade, explode, damageZombie, killZombie, pickType, bossForWave, BOSS_LIST, ENEMY_SPECS, ENEMY_NAMES, ENEMY_UNLOCKS, WEAPONS, GUN_ORDER, HEROES, HERO_ORDER, FONT, sfx, switchWeapon, rocketBoom, mineBoom, bushes, walls, toxicBurst, bomberBoom, shootAcid, findFreeSpot, pointInWall, clearWave };
 if (new URLSearchParams(location.search).has('auto')) startGame();
 </script>
 </body>
