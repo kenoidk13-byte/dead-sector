@@ -10,7 +10,14 @@
 <title>DEAD SECTOR // охота на насекомых</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800;900&display=swap');
-  :root{ --amber:#ffb545; }
+  :root{
+    --amber:#ffb545;
+    /* безопасные зоны (вырез, «домашняя» полоса) — нужны в горизонтали */
+    --sat:env(safe-area-inset-top, 0px);
+    --sar:env(safe-area-inset-right, 0px);
+    --sab:env(safe-area-inset-bottom, 0px);
+    --sal:env(safe-area-inset-left, 0px);
+  }
   *{ box-sizing:border-box; }
   html,body{ height:100%; margin:0; background:#05070a; overflow:hidden; overscroll-behavior:none; touch-action:none; }
   body{ font-family:"Inter Tight","Inter",system-ui,-apple-system,"Segoe UI",sans-serif; color:#e8e2d4; user-select:none; -webkit-user-select:none; -webkit-tap-highlight-color:transparent; }
@@ -60,6 +67,25 @@ let cw = 1920, ch = 1080, dpr = 1, ui = 1, zoom = 1;
 let dprMax = 1;          // штатный DPR для этого устройства
 let renderScale = 1;     // автопонижение разрешения при просадках (1 … 0.6)
 let vignetteCache = null;
+/* безопасные зоны экрана: на iPhone в горизонтали слева вырез, снизу полоса */
+const SAFE = { t: 0, r: 0, b: 0, l: 0 };
+
+function readSafeArea(){
+  const cs = getComputedStyle(document.documentElement);
+  const val = (name) => {
+    const v = parseFloat(cs.getPropertyValue(name));
+    return Number.isFinite(v) ? v : 0;
+  };
+  // в портрете вырез сверху, в горизонтали — сбоку: env() сам даёт верные края
+  SAFE.t = val('--sat');
+  SAFE.r = val('--sar');
+  SAFE.b = val('--sab');
+  SAFE.l = val('--sal');
+  if (IS_PORTRAIT()){ SAFE.l = 0; SAFE.r = 0; }
+}
+function isLandscapeMobile(){ return IS_MOBILE && ch <= cw; }
+function safeW(){ return Math.max(240, cw - SAFE.l - SAFE.r); }
+function safeCx(){ return SAFE.l + safeW() / 2; }
 
 function applyCanvasSize(){
   cvs.width = Math.max(1, Math.round(cw * dpr));
@@ -72,6 +98,7 @@ function applyCanvasSize(){
 function resize(){
   cw = Math.max(320, window.innerWidth);
   ch = Math.max(240, window.innerHeight);
+  readSafeArea();
   // на телефонах ограничиваем DPR — это главный резерв FPS
   dprMax = Math.min(IS_MOBILE ? 1.5 : 2, window.devicePixelRatio || 1);
   dpr = dprMax * renderScale;
@@ -95,7 +122,11 @@ function setRenderScale(s){
   applyCanvasSize();
 }
 window.addEventListener('resize', resize);
-window.addEventListener('orientationchange', () => setTimeout(resize, 120));
+function relayout(){ resize(); setTimeout(resize, 120); setTimeout(resize, 420); }
+window.addEventListener('orientationchange', relayout);
+if (window.screen && screen.orientation && screen.orientation.addEventListener){
+  screen.orientation.addEventListener('change', relayout);
+}
 if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 resize();
 
@@ -692,18 +723,23 @@ function mobileScale(){
 /* раскладка мобильного HUD/управления (пересчитывается на лету) */
 function mobileLayout(){
   const m = mobileScale();
-  const stickR = Math.min(84, Math.max(48, Math.min(cw, ch) * 0.15));
-  const margin = stickR + Math.max(12, 18 * m);
-  const moveHome = { x: margin, y: ch - margin };
-  const aimHome  = { x: cw - margin, y: ch - margin };
+  const land = isLandscapeMobile();
+  const minSide = Math.min(cw, ch);
+  const stickR = Math.min(land ? 74 : 84, Math.max(land ? 44 : 48, minSide * (land ? 0.15 : 0.15)));
+  const edgeX = land ? Math.min(SAFE.l, SAFE.r) : 0;
+  const margin = stickR + Math.max(10, (land ? 13 : 18) * m) + edgeX;
+  const bottom = ch - SAFE.b;
+  const moveHome = { x: SAFE.l + margin, y: bottom - margin };
+  const aimHome  = { x: cw - SAFE.r - margin, y: bottom - margin };
   const r = Math.max(19, Math.min(30, 23 * m));
   const bw = r * 2;
   const gap = Math.max(5, 8 * m);
   const total = bw * 5 + gap * 4;
-  const rowY = IS_PORTRAIT()
-    ? ch - margin - stickR - 36 * m
-    : ch - margin;
-  const startX = cw / 2 - total / 2 + r;
+  // в горизонтали кнопки у самого низа, между стиками; в портрете — над ними
+  const rowY = land
+    ? bottom - r - Math.max(8, 10 * m)
+    : bottom - margin - stickR - 36 * m;
+  const startX = Math.max(SAFE.l + r + 4, Math.min(cw - SAFE.r - total + r - 4, cw / 2 - total / 2 + r));
   const labels = ['РЫВОК', 'ПАТР', 'ГРАН', 'ОРУЖ', 'ПАУЗА'];
   const acts = ['dash', 'reload', 'grenade', 'weapon', 'pause'];
   const buttons = labels.map((label, i) => ({
@@ -1994,42 +2030,43 @@ function cycleSelect(dir){
 function mobileSelectLayout(){
   const m = mobileScale();
   const landscape = ch < 520;
+  const sw = safeW();
   if (landscape){
     // на телефоне в горизонтали карточка «лежит»: фото слева, статы справа
     const titleFs = Math.min(22 * m, ch * 0.085);
-    const titleY = titleFs + 2 * m;
+    const titleY = titleFs + 2 * m + SAFE.t;
     const tabH = Math.max(24 * m, 24);
     const tabsY = titleY + 4 * m;
     const tabGap = 8 * m;
-    const tabW = Math.min(200 * m, (cw - 24 * m - tabGap) / 2);
+    const tabW = Math.min(200 * m, (sw - 24 * m - tabGap) / 2);
     const cardTop = tabsY + tabH + 7 * m;
-    const w = cw - 24 * m;
-    const h = Math.max(120, ch - cardTop - 26 * m);
+    const w = sw - 24 * m;
+    const h = Math.max(120, ch - SAFE.b - cardTop - 26 * m);
     return {
       landscape: true,
       m, u: 0.6, w, h,
       titleFs, titleY, tabH, tabW, tabGap,
-      tabsY, tabsX0: cw / 2 - (tabW * 2 + tabGap) / 2,
-      x: 12 * m, y: cardTop
+      tabsY, tabsX0: SAFE.l + sw / 2 - (tabW * 2 + tabGap) / 2,
+      x: SAFE.l + 12 * m, y: cardTop
     };
   }
-  const titleFs = Math.min(34 * m, cw / 8, ch * 0.12);
-  const titleY = titleFs + 10 * m;
+  const titleFs = Math.min(34 * m, sw / 9, ch * 0.12);
+  const titleY = titleFs + 10 * m + SAFE.t;
   const tabH = 28 * m;
   const tabsY = titleY + 8 * m;
   const tabGap = 8 * m;
-  const tabW = Math.min(210 * m, (cw - 28 * m - tabGap) / 2);
+  const tabW = Math.min(210 * m, (sw - 24 * m - tabGap) / 2);
   const cardTop = tabsY + tabH + 10 * m;
   const u = Math.max(0.3, Math.min(1.2,
-    (ch - cardTop - 46 * m) / 600,
-    (cw - 28 * m) / 430));
-  const w = 430 * u, h = Math.min(600 * u, ch - cardTop - 40 * m);
+    (ch - SAFE.b - cardTop - 46 * m) / 600,
+    (sw - 24 * m) / 430));
+  const w = 430 * u, h = Math.min(600 * u, ch - SAFE.b - cardTop - 40 * m);
   return {
     landscape: false,
     m, u, w, h,
     titleFs, titleY, tabH, tabW, tabGap,
-    tabsY, tabsX0: cw / 2 - (tabW * 2 + tabGap) / 2,
-    x: cw / 2 - w / 2, y: cardTop
+    tabsY, tabsX0: SAFE.l + sw / 2 - (tabW * 2 + tabGap) / 2,
+    x: SAFE.l + (sw - w) / 2, y: cardTop
   };
 }
 
@@ -5012,40 +5049,44 @@ function drawHUD(){
 /* --------------------------- mobile HUD -------------------------- */
 function drawMobileHUD(){
   const m = mobileScale();
-  const pad = 9 * m;
-  const pw = Math.min(172 * m, cw * 0.46);
+  const land = isLandscapeMobile();
+  const padL = 9 * m + SAFE.l;
+  const padR = 9 * m + SAFE.r;
+  const padT = 9 * m + SAFE.t;
+  const pad = padT;
+  const pw = Math.min(172 * m, (cw - SAFE.l - SAFE.r) * 0.46);
   const th = 48 * m;
   const g = player.guns[player.cur];
   const hero = HEROES[player.heroId] || HEROES.volk;
 
   // слева: волна / убийства / очки
-  panel(pad, pad, pw, th, 'rgba(5,10,12,0.66)', 'rgba(255,181,69,0.26)');
-  txt('ВОЛНА ' + String(state.wave).padStart(2, '0'), pad + 9 * m, pad + 16 * m, Math.max(10, 10 * m), '#ffb545', 'left', 800);
+  panel(padL, padT, pw, th, 'rgba(5,10,12,0.66)', 'rgba(255,181,69,0.26)');
+  txt('ВОЛНА ' + String(state.wave).padStart(2, '0'), padL + 9 * m, padT + 16 * m, Math.max(10, 10 * m), '#ffb545', 'left', 800);
   txt(state.waveState === 'break' ? 'ПЕРЕДЫШКА ' + Math.ceil(Math.max(0, state.breakT)) : 'ЗАЧИСТКА',
-    pad + pw - 9 * m, pad + 16 * m, Math.max(8, 7 * m), state.waveState === 'break' ? '#7fd8c8' : '#ff8a5a', 'right', 700);
-  txt('УБ ' + state.kills, pad + 9 * m, pad + 31 * m, Math.max(9, 8.5 * m), '#cfd8d4', 'left', 700);
-  txt('ОЧКИ ' + state.score, pad + 9 * m, pad + 43 * m, Math.max(9, 8.5 * m), '#ffd06a', 'left', 700);
+    padL + pw - 9 * m, padT + 16 * m, Math.max(8, 7 * m), state.waveState === 'break' ? '#7fd8c8' : '#ff8a5a', 'right', 700);
+  txt('УБ ' + state.kills, padL + 9 * m, padT + 31 * m, Math.max(9, 8.5 * m), '#cfd8d4', 'left', 700);
+  txt('ОЧКИ ' + state.score, padL + 9 * m, padT + 43 * m, Math.max(9, 8.5 * m), '#ffd06a', 'left', 700);
 
   // справа: оружие и патроны
-  const rx = cw - pad - pw;
-  panel(rx, pad, pw, th, 'rgba(5,10,12,0.66)', 'rgba(255,181,69,0.26)');
-  txt(WEAPONS[player.cur].tag, rx + 9 * m, pad + 16 * m, 8.5 * m, '#ffb545', 'left', 800);
-  txt(String(g.mag).padStart(2, '0'), rx + 9 * m, pad + 38 * m, 19 * m, g.mag > 0 ? '#e8e2d4' : '#ff4d3d', 'left', 800);
-  txt('/ ' + (Number.isFinite(g.reserve) ? g.reserve : '∞'), rx + 9 * m + 24 * m, pad + 38 * m, 10 * m, '#98a3a3', 'left', 700);
+  const rx = cw - padR - pw;
+  panel(rx, padT, pw, th, 'rgba(5,10,12,0.66)', 'rgba(255,181,69,0.26)');
+  txt(WEAPONS[player.cur].tag, rx + 9 * m, padT + 16 * m, 8.5 * m, '#ffb545', 'left', 800);
+  txt(String(g.mag).padStart(2, '0'), rx + 9 * m, padT + 38 * m, 19 * m, g.mag > 0 ? '#e8e2d4' : '#ff4d3d', 'left', 800);
+  txt('/ ' + (Number.isFinite(g.reserve) ? g.reserve : '∞'), rx + 9 * m + 24 * m, padT + 38 * m, 10 * m, '#98a3a3', 'left', 700);
   if (player.reloadT > 0){
-    bar(rx + pw * 0.52, pad + 34 * m, pw * 0.42, 5 * m, 1 - player.reloadT / WEAPONS[player.cur].reload, '#ffb545');
+    bar(rx + pw * 0.52, padT + 34 * m, pw * 0.42, 5 * m, 1 - player.reloadT / WEAPONS[player.cur].reload, '#ffb545');
   }
 
   // здоровье — под левой панелью
-  const hbY = pad + th + 7 * m;
+  const hbY = padT + th + 7 * m;
   const hpPct = player.hp / player.maxHp;
   const hpCol = hpPct > 0.55 ? '#5fd27a' : hpPct > 0.28 ? '#ffb545' : '#ff4d3d';
-  bar(pad, hbY, pw, 8 * m, hpPct, hpCol, 'rgba(0,0,0,0.55)');
-  txt('HP ' + Math.ceil(player.hp), pad + 2 * m, hbY + 19 * m, 8 * m, '#cfd8d4', 'left', 700);
-  txt(hero.name, pad + pw - 2 * m, hbY + 19 * m, 8 * m, hero.color, 'right', 800);
+  bar(padL, hbY, pw, 8 * m, hpPct, hpCol, 'rgba(0,0,0,0.55)');
+  txt('HP ' + Math.ceil(player.hp), padL + 2 * m, hbY + 19 * m, 8 * m, '#cfd8d4', 'left', 700);
+  txt(hero.name, padL + pw - 2 * m, hbY + 19 * m, 8 * m, hero.color, 'right', 800);
 
   // гранаты — иконки справа под панелью оружия
-  let gx = cw - pad - 6 * m;
+  let gx = cw - padR - 6 * m;
   for (let i = 0; i < player.maxGrenades; i++){
     const on = i < player.grenades;
     ctx.beginPath();
@@ -5061,12 +5102,12 @@ function drawMobileHUD(){
   // босс
   const boss = zombies.find(z => z.type === 'boss' && !z.dead);
   if (boss){
-    const bw = cw - pad * 2;
-    const by = pad + th + 44 * m;
+    const bw = cw - padL - padR;
+    const by = padT + th + 44 * m;
     const accent = boss.bossAccent || '#ff8a5a';
-    txt(boss.bossName || 'БОСС', pad, by - 4 * m, 8.5 * m, accent, 'left', 800);
-    txt(Math.max(0, Math.ceil(boss.hp)) + ' HP', cw - pad, by - 4 * m, 8 * m, '#c9b79a', 'right', 700);
-    bar(pad, by, bw, 7 * m, boss.hp / boss.maxHp, accent, 'rgba(40,10,6,0.7)');
+    txt(boss.bossName || 'БОСС', padL, by - 4 * m, 8.5 * m, accent, 'left', 800);
+    txt(Math.max(0, Math.ceil(boss.hp)) + ' HP', cw - padR, by - 4 * m, 8 * m, '#c9b79a', 'right', 700);
+    bar(padL, by, bw, 7 * m, boss.hp / boss.maxHp, accent, 'rgba(40,10,6,0.7)');
   }
 
   // объявление нового врага — коротко
@@ -5074,8 +5115,8 @@ function drawMobileHUD(){
     const a = clamp(state.unlockT, 0, 1);
     ctx.save();
     ctx.globalAlpha = a;
-    const uy = pad + th + (boss ? 62 : 40) * m;
-    txt(state.unlockText, cw / 2, uy, 8 * m, '#ffd06a', 'center', 700);
+    const uy = padT + th + (boss ? 62 : 40) * m;
+    txt(state.unlockText, safeCx(), uy, 8 * m, '#ffd06a', 'center', 700);
     ctx.restore();
   }
 }
@@ -5212,22 +5253,23 @@ function drawBanner(){
   ctx.save();
   ctx.globalAlpha = clamp(a, 0, 1);
   ctx.textAlign = 'center';
-  const bw = Math.min(640 * ui, cw - 16);
+  const bw = Math.min(640 * ui, safeW() - 16);
   const bh = Math.min(96 * ui, ch * 0.24);
+  const bcx = safeCx();
   ctx.fillStyle = 'rgba(4,8,10,0.55)';
-  ctx.fillRect(cw / 2 - bw / 2, y - bh * 0.56, bw, bh);
+  ctx.fillRect(bcx - bw / 2, y - bh * 0.56, bw, bh);
   ctx.strokeStyle = 'rgba(255,181,69,0.35)';
-  ctx.strokeRect(cw / 2 - bw / 2, y - bh * 0.56, bw, bh);
+  ctx.strokeRect(bcx - bw / 2, y - bh * 0.56, bw, bh);
   ctx.font = '800 ' + Math.round(Math.min(52 * ui, bw / 7)) + 'px ' + FONT;
   ctx.fillStyle = '#ffb545';
   ctx.shadowColor = 'rgba(255,140,40,0.8)';
   ctx.shadowBlur = IS_MOBILE ? 12 : 24;
-  ctx.fillText(state.banner, cw / 2, y + 6 * ui);
+  ctx.fillText(state.banner, bcx, y + 6 * ui);
   ctx.shadowBlur = 0;
   if (state.bannerSub){
     ctx.font = '600 ' + Math.round(Math.min(15 * ui, bw / 24)) + 'px ' + FONT;
     ctx.fillStyle = 'rgba(201,183,154,0.9)';
-    ctx.fillText(state.bannerSub, cw / 2, y + bh * 0.34);
+    ctx.fillText(state.bannerSub, bcx, y + bh * 0.34);
   }
   ctx.restore();
 }
@@ -5241,9 +5283,9 @@ function drawPickupMsg(){
   ctx.globalAlpha = clamp(k, 0, 1);
   ctx.textAlign = 'center';
   const y = ch * 0.5;
-  const bw = Math.min(600 * ui, cw - 16);
+  const bw = Math.min(600 * ui, safeW() - 16);
   const bh = Math.min(92 * ui, bw * 0.153);
-  ctx.translate(cw / 2, y);
+  ctx.translate(safeCx(), y);
   ctx.scale(pop, pop);
   ctx.fillStyle = 'rgba(4,8,10,0.62)';
   ctx.fillRect(-bw / 2, -bh / 2, bw, bh);
@@ -5360,19 +5402,21 @@ function drawMenu(){
 
 function drawMenuMobile(){
   const m = mobileScale();
-  const cx = cw / 2;
-  const titleFs = Math.min(150 * ui, cw / 7.2, ch * 0.2);
-  const subFs = Math.min(22 * ui, cw / 19, ch * 0.06);
-  const subLines = cw < 620
+  const sw = safeW();
+  const cx = safeCx();
+  const titleFs = Math.min(150 * ui, sw / 7.2, ch * 0.2);
+  const subFs = Math.min(22 * ui, sw / 19, ch * 0.06);
+  const subLines = sw < 620
     ? ['ОХОТА НА ГИГАНТСКИХ НАСЕКОМЫХ', 'ПРОТОКОЛ КАРАНТИНА']
     : ['ОХОТА НА ГИГАНТСКИХ НАСЕКОМЫХ // ПРОТОКОЛ КАРАНТИНА'];
   const subLH = subFs * 1.32;
-  const panelW = Math.min(720 * ui, cw - 24 * m);
+  const panelW = Math.min(720 * ui, sw - 24 * m);
   const panelH = 104 * m;
-  const promptFs = Math.min(20 * m, cw / 22, ch * 0.05);
+  const promptFs = Math.min(20 * m, sw / 22, ch * 0.05);
   const bestFs = Math.min(13 * m, ch * 0.035);
   const total = titleFs * 0.9 + 6 * m + subLH * subLines.length + 16 * m + panelH + 22 * m + promptFs + (state.best > 0 ? 10 * m + bestFs : 0);
-  let y = Math.max(12 * m, (ch - total) / 2);
+  const availH = ch - SAFE.t - SAFE.b;
+  let y = SAFE.t + Math.max(10 * m, (availH - total) / 2);
 
   ctx.save();
   ctx.textAlign = 'center';
@@ -5583,7 +5627,7 @@ function drawSelectMobile(){
   ctx.fillStyle = '#ffb545';
   ctx.shadowColor = 'rgba(255,120,30,0.85)';
   ctx.shadowBlur = 18 * m;
-  ctx.fillText('ВЫБОР БОЙЦА', cw / 2, L.titleY);
+  ctx.fillText('ВЫБОР БОЙЦА', safeCx(), L.titleY);
   ctx.shadowBlur = 0;
   ctx.restore();
 
@@ -5621,13 +5665,14 @@ function drawSelectMobile(){
   }
 
   // подсказки
-  const fs = Math.max(9.5, Math.min(11.5 * m, cw / 34));
-  const hy = Math.min(ch - 6 * m, r.y + r.h + fs * 1.9);
+  const sw = safeW();
+  const fs = Math.max(9.5, Math.min(11.5 * m, sw / 34));
+  const hy = Math.min(ch - SAFE.b - 5 * m, r.y + r.h + fs * 1.9);
   ctx.save();
   ctx.textAlign = 'center';
   ctx.font = '700 ' + Math.round(fs) + 'px ' + FONT;
   ctx.fillStyle = '#b9c4c2';
-  ctx.fillText('ТАП ПО ВКЛАДКЕ — ВЫБОР · ТАП ПО КАРТОЧКЕ — В БОЙ', cw / 2, hy);
+  ctx.fillText('ТАП ПО ВКЛАДКЕ — ВЫБОР · ТАП ПО КАРТОЧКЕ — В БОЙ', safeCx(), hy);
   ctx.restore();
 }
 
@@ -5686,42 +5731,61 @@ function drawMobileCardPortrait(L, r, hero, id, pad){
   }
 }
 
-/* горизонтальная карточка (телефон повёрнут) */
+/* горизонтальная карточка (телефон повёрнут): фото + имя + кнопка слева, статы справа */
 function drawMobileCardLandscape(L, r, hero, id, pad){
-  const eyeH = r.h - pad * 1.4;
-  // слева фото + имя
-  const ps = Math.min(eyeH * 0.86, r.w * 0.34);
-  const px = r.x + pad * 1.2;
-  const py = r.y + r.h / 2 - ps / 2 - ps * 0.07;
+  const innerH = r.h - pad * 2;
+  const nameFs = Math.max(17, Math.min(26, r.h * 0.075));
+  const roleFs = Math.max(9.5, Math.min(12, nameFs * 0.46));
+  const bh = Math.max(30, Math.min(42, r.h * 0.13));
+
+  // левая колонка: фото, имя, роль, кнопка
+  const leftW = Math.min(r.w * 0.44, Math.max(180, r.h * 0.8));
+  const cxL = r.x + leftW / 2;
+  const textBlock = nameFs * 1.05 + roleFs * 1.6 + 8 + bh;
+  const ps = Math.max(56, Math.min(leftW - pad * 2, innerH - textBlock - 8));
+  const px = r.x + (leftW - ps) / 2;
+  const py = r.y + pad;
   drawPortrait(px, py, ps, id, hero.tint, hero.accent);
 
-  const colX = px + ps + pad * 1.2;
-  const colW = r.x + r.w - pad - colX;
-  const cx = colX + colW / 2;
-  const nameFs = Math.max(18, Math.min(26, ps * 0.16));
-  txt(hero.name, cx, py + ps * 0.72, nameFs, hero.color, 'center', 800);
-  txt(hero.role + ' // ' + hero.tag, cx, py + ps * 0.72 + nameFs * 0.95,
-    Math.max(9.5, Math.min(12, nameFs * 0.5)), '#7fd8c8', 'center', 700);
+  let ly = py + ps + nameFs * 1.02;
+  txt(hero.name, cxL, ly, nameFs, hero.color, 'center', 800);
+  ly += roleFs * 1.55;
+  txt(hero.role + ' // ' + hero.tag, cxL, ly, roleFs, '#7fd8c8', 'center', 700);
 
-  // кнопка «в бой» под фото
-  const bh = Math.max(32, Math.min(42, r.h * 0.14));
-  const by = py + ps * 0.72 + nameFs * 1.8;
-  panel(colX, by, colW, bh, hero.color, hero.color);
-  txt('▶ В БОЙ', cx, by + bh * 0.69, Math.max(13, Math.min(16, bh * 0.4)), '#12160f', 'center', 800);
+  const bx = r.x + pad;
+  const bw = leftW - pad * 2;
+  const by = r.y + r.h - pad - bh;
+  panel(bx, by, bw, bh, hero.color, hero.color);
+  txt('▶ В БОЙ', cxL, by + bh * 0.69, Math.max(13, Math.min(16, bh * 0.4)), '#12160f', 'center', 800);
 
-  // справа характеристики
+  // разделитель между колонками
+  ctx.strokeStyle = hexA(hero.accent, 0.35);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(r.x + leftW, r.y + pad);
+  ctx.lineTo(r.x + leftW, r.y + r.h - pad);
+  ctx.stroke();
+
+  // правая колонка: характеристики + описание
   const rows = mobileStatRows(hero);
-  const sx = colX;
-  const sw = colW;
-  let sy = by + bh + Math.max(10, r.h * 0.05);
-  const rowH = Math.max(22, Math.min(34, (r.y + r.h - pad - sy) / rows.length));
-  const lblFs = Math.max(9.5, Math.min(12.5, rowH * 0.42));
+  const sx = r.x + leftW + pad * 0.7;
+  const sw = r.x + r.w - pad - sx;
+  let sy = r.y + pad + 2;
+  const rowH = Math.max(22, Math.min(44, innerH / 4.2));
+  const lblFs = Math.max(9.5, Math.min(13, rowH * 0.36));
   for (const row of rows){
+    txt(row.label, sx, sy + lblFs, lblFs, '#98a3a3', 'left', 700);
+    txt(row.value, sx + sw, sy + lblFs, lblFs * 1.05, row.color, 'right', 800);
+    bar(sx, sy + lblFs * 1.65, sw, 6, clamp(row.frac, 0, 1), row.color, 'rgba(0,0,0,0.55)');
     sy += rowH;
-    if (sy > r.y + r.h - 2) break;
-    txt(row.label, sx, sy, lblFs, '#98a3a3', 'left', 700);
-    txt(row.value, sx + sw, sy, lblFs * 1.05, row.color, 'right', 800);
-    bar(sx, sy + lblFs * 0.55, sw, 6, clamp(row.frac, 0, 1), row.color, 'rgba(0,0,0,0.55)');
+  }
+
+  const descFs = Math.max(9.5, Math.min(11.5, sw / 30));
+  let dy = sy + descFs * 1.8;
+  for (const line of hero.desc.slice(0, 2)){
+    if (dy > r.y + r.h - pad) break;
+    txt(line, sx, dy, descFs, '#b9c4c2', 'left', 600);
+    dy += descFs * 1.55;
   }
 }
 
@@ -5738,26 +5802,26 @@ function drawPause(){
   ctx.fillRect(0, 0, cw, ch);
   ctx.save();
   ctx.textAlign = 'center';
-  ctx.font = '900 ' + Math.round(Math.min(64 * ui, cw / 6)) + 'px ' + FONT;
+  ctx.font = '900 ' + Math.round(Math.min(64 * ui, safeW() / 6)) + 'px ' + FONT;
   ctx.fillStyle = '#ffb545';
-  ctx.fillText('ПАУЗА', cw / 2, ch / 2 - 10 * ui);
-  ctx.font = '600 ' + Math.round(Math.min(16 * ui, cw / 20)) + 'px ' + FONT;
+  ctx.fillText('ПАУЗА', safeCx(), ch / 2 - 10 * ui);
+  ctx.font = '600 ' + Math.round(Math.min(16 * ui, safeW() / 20)) + 'px ' + FONT;
   ctx.fillStyle = '#b9c4c2';
-  ctx.fillText(IS_MOBILE ? 'ТАП — ПРОДОЛЖИТЬ' : 'ESC / ЛКМ — продолжить', cw / 2, ch / 2 + 26 * ui);
+  ctx.fillText(IS_MOBILE ? 'ТАП — ПРОДОЛЖИТЬ' : 'ESC / ЛКМ — продолжить', safeCx(), ch / 2 + 26 * ui);
   ctx.restore();
 }
 
 function drawDead(){
-  const k = Math.min(ui, cw / 520);
+  const k = Math.min(ui, safeW() / 520);
   ctx.fillStyle = 'rgba(24,2,2,0.62)';
   ctx.fillRect(0, 0, cw, ch);
   ctx.save();
   ctx.textAlign = 'center';
-  ctx.font = '900 ' + Math.round(Math.min(86 * k, cw / 6.4)) + 'px ' + FONT;
+  ctx.font = '900 ' + Math.round(Math.min(86 * k, safeW() / 6.4)) + 'px ' + FONT;
   ctx.fillStyle = '#ff4d3d';
   ctx.shadowColor = 'rgba(255,40,20,0.8)';
   ctx.shadowBlur = 30 * k;
-  ctx.fillText('ВЫ МЕРТВЫ', cw / 2, ch / 2 - 60 * k);
+  ctx.fillText('ВЫ МЕРТВЫ', safeCx(), ch / 2 - 60 * k);
   ctx.shadowBlur = 0;
 
   const stats = [
@@ -5766,10 +5830,11 @@ function drawDead(){
     ['ОЧКИ', String(state.score)],
     ['РЕКОРД', String(state.best)]
   ];
-  const pw = 420 * k;
-  panel(cw / 2 - pw / 2, ch / 2 - 36 * k, pw, 112 * k, 'rgba(8,6,6,0.8)', 'rgba(255,77,61,0.35)');
+  const pw = Math.min(420 * k, safeW() - 20);
+  const pcx = safeCx();
+  panel(pcx - pw / 2, ch / 2 - 36 * k, pw, 112 * k, 'rgba(8,6,6,0.8)', 'rgba(255,77,61,0.35)');
   stats.forEach((s, i) => {
-    const x = cw / 2 - pw / 2 + 28 * k + (i % 2) * (pw / 2);
+    const x = pcx - pw / 2 + 28 * k + (i % 2) * (pw / 2);
     const y = ch / 2 + 2 * k + Math.floor(i / 2) * 42 * k;
     ctx.textAlign = 'left';
     ctx.font = '600 ' + Math.round(13 * k) + 'px ' + FONT;
@@ -5783,7 +5848,7 @@ function drawDead(){
   ctx.textAlign = 'center';
   ctx.font = '800 ' + Math.round(19 * k) + 'px ' + FONT;
   ctx.fillStyle = '#ffd06a';
-  ctx.fillText(IS_MOBILE ? 'ТАП — ВЫБРАТЬ БОЙЦА' : 'R / ЛКМ — ВЫБРАТЬ БОЙЦА', cw / 2, ch / 2 + 112 * k);
+  ctx.fillText(IS_MOBILE ? 'ТАП — ВЫБРАТЬ БОЙЦА' : 'R / ЛКМ — ВЫБРАТЬ БОЙЦА', safeCx(), ch / 2 + 112 * k);
   ctx.restore();
 }
 
@@ -6101,7 +6166,7 @@ cam.y = clamp(WORLD.h / 2 - viewH() / 2, 0, Math.max(0, WORLD.h - viewH()));
 requestAnimationFrame(frame);
 
 // отладочный автозапуск: index.html?auto
-window.__ds = { player, state, zombies, bullets, enemyBullets, pickups, gibs, pools, texts, particles, shockwaves, grenades, mines, cam, view, screenBlood, startGame, openSelect, selectHero, cycleSelect, heroCardRect, heroCardAt, selectTabRect, mobileSelectLayout, mobileLayout, touch, viewW, viewH, zoom: () => zoom, renderScale: () => renderScale, setRenderScale, dpr: () => dpr, IS_MOBILE, shoot, dash, update, beginWave, spawnZombie, spawnPickup, applyPickup, dropLoot, hurtPlayer, throwGrenade, explode, damageZombie, killZombie, pickType, bossForWave, BOSS_LIST, ENEMY_SPECS, ENEMY_NAMES, ENEMY_UNLOCKS, WEAPONS, GUN_ORDER, HEROES, HERO_ORDER, FONT, sfx, switchWeapon, rocketBoom, mineBoom, bushes, walls, toxicBurst, bomberBoom, shootAcid, findFreeSpot, pointInWall };
+window.__ds = { player, state, zombies, bullets, enemyBullets, pickups, gibs, pools, texts, particles, shockwaves, grenades, mines, cam, view, screenBlood, SAFE, safeW, safeCx, startGame, openSelect, selectHero, cycleSelect, heroCardRect, heroCardAt, selectTabRect, mobileSelectLayout, mobileLayout, touch, viewW, viewH, zoom: () => zoom, renderScale: () => renderScale, setRenderScale, dpr: () => dpr, IS_MOBILE, shoot, dash, update, beginWave, spawnZombie, spawnPickup, applyPickup, dropLoot, hurtPlayer, throwGrenade, explode, damageZombie, killZombie, pickType, bossForWave, BOSS_LIST, ENEMY_SPECS, ENEMY_NAMES, ENEMY_UNLOCKS, WEAPONS, GUN_ORDER, HEROES, HERO_ORDER, FONT, sfx, switchWeapon, rocketBoom, mineBoom, bushes, walls, toxicBurst, bomberBoom, shootAcid, findFreeSpot, pointInWall };
 if (new URLSearchParams(location.search).has('auto')) startGame();
 </script>
 </body>
