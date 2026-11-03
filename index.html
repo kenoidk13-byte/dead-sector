@@ -122,7 +122,11 @@ function setRenderScale(s){
   applyCanvasSize();
 }
 window.addEventListener('resize', resize);
-function relayout(){ resize(); setTimeout(resize, 120); setTimeout(resize, 420); }
+function relayout(){
+  // при повороте старые касания уже не соответствуют новой раскладке
+  resetInputs();
+  resize(); setTimeout(resize, 120); setTimeout(resize, 420);
+}
 window.addEventListener('orientationchange', relayout);
 if (window.screen && screen.orientation && screen.orientation.addEventListener){
   screen.orientation.addEventListener('change', relayout);
@@ -744,7 +748,7 @@ function mobileLayout(){
   // в горизонтали кнопки у самого низа, между стиками; в портрете — над ними
   const rowY = land
     ? bottom - r - Math.max(8, 10 * m)
-    : bottom - margin - stickR - 36 * m;
+    : bottom - margin - stickR - Math.max(40 * m, r * 1.5 + 10);
   const startX = Math.max(SAFE.l + r + 4, Math.min(cw - SAFE.r - total + r - 4, cw / 2 - total / 2 + r));
   const labels = ['РЫВОК', 'ПАТР', 'ГРАН', 'ОРУЖ', 'ПАУЗА'];
   const acts = ['dash', 'reload', 'grenade', 'weapon', 'pause'];
@@ -775,6 +779,14 @@ function moveStick(s, x, y){
 function resetStick(s){
   s.id = -1; s.active = false;
   s.dx = 0; s.dy = 0; s.mag = 0;
+}
+
+/* сброс всех касаний: поворот экрана, сворачивание игры */
+function resetInputs(){
+  mouse.down = false;
+  resetStick(touch.move);
+  resetStick(touch.aim);
+  touch.pressed = null;
 }
 
 function cycleWeapon(){
@@ -1939,10 +1951,8 @@ window.addEventListener('pointerup', endPointer);
 window.addEventListener('pointercancel', endPointer);
 cvs.addEventListener('contextmenu', e => e.preventDefault());
 window.addEventListener('blur', () => {
-  mouse.down = false;
+  resetInputs();
   for (const k in keys) keys[k] = false;
-  resetStick(touch.move);
-  resetStick(touch.aim);
   if (state.mode === 'playing') state.mode = 'paused';
 });
 document.addEventListener('visibilitychange', () => {
@@ -2416,12 +2426,14 @@ function updatePlayer(dt){
   if (IS_MOBILE && touch.aim.active && touch.aim.mag > 0.16){
     p.aim = Math.atan2(touch.aim.dy, touch.aim.dx);
     aimAssist();
-  } else {
+  } else if (!IS_MOBILE){
     const wmx = mouse.x / zoom + view.x;
     const wmy = mouse.y / zoom + view.y;
     mouse.wx = wmx; mouse.wy = wmy;
     p.aim = Math.atan2(wmy - p.y, wmx - p.x);
   }
+  // на телефоне без правого стика сохраняем последний прицел:
+  // иначе фонарь и ствол «прыгают» в сторону камеры после отпускания
 
   if (mouse.down || (IS_MOBILE && touch.aim.active && touch.aim.mag > 0.16)) shoot();
 }
@@ -4823,10 +4835,11 @@ function drawCrosshair(){
   const w = WEAPONS[player.cur];
   const spread = (8 + w.spread * 260 + state.shake * 0.7) * (IS_MOBILE ? 0.85 : 1);
   let x, y;
-  if (IS_MOBILE && touch.aim.active){
+  if (IS_MOBILE){
+    // прицел всегда в направлении ствола: и со стиком, и после его отпускания
     const psx = (player.x - view.x) * zoom;
     const psy = (player.y - view.y) * zoom;
-    const d = 96 + 54 * touch.aim.mag;
+    const d = 96 + 54 * (touch.aim.active ? touch.aim.mag : 0.4);
     x = psx + Math.cos(player.aim) * d;
     y = psy + Math.sin(player.aim) * d;
   } else {
