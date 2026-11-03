@@ -391,9 +391,58 @@ function initAudio(){
         conv.connect(wet);
         wet.connect(comp);
       } catch (e){ revIn = null; }
+      // iOS умеет уходить в 'interrupted' (звонок, Siri, переключение устройства):
+      // как только контекст вернулся в running — тихо «пингуем», чтобы граф ожил.
+      try {
+        AC.addEventListener('statechange', () => {
+          if (AC && AC.state === 'running') silencePing();
+        });
+      } catch (e){}
     } catch (e){ AC = null; }
   }
-  if (AC && AC.state === 'suspended') AC.resume();
+  if (AC && (AC.state === 'suspended' || AC.state === 'interrupted')){
+    try {
+      const p = AC.resume();
+      if (p && p.catch) p.catch(() => {});
+    } catch (e){}
+  }
+}
+
+/* Тихий однокадровый буфер. На iOS именно он «протаскивает» AudioContext
+   в running внутри пользовательского жеста (pointerdown/touchend/click). */
+function silencePing(){
+  if (!AC) return;
+  try {
+    const buf = AC.createBuffer(1, 1, 22050);
+    const src = AC.createBufferSource();
+    src.buffer = buf;
+    src.connect(AC.destination);
+    src.start(0);
+  } catch (e){}
+}
+
+function unlockAudio(){
+  if (!AC) initAudio();
+  if (!AC) return;
+  // Safari 17+: категория playback — звук играет даже при выключенном
+  // переключателе «Без звука» на iPhone. Без этого WebAudio глушится.
+  try {
+    if (navigator.audioSession) navigator.audioSession.type = 'playback';
+  } catch (e){}
+  // пинг синхронно, пока жест ещё «живой»
+  silencePing();
+  if (AC.state !== 'running'){
+    try {
+      const p = AC.resume();
+      if (p && p.then) p.then(silencePing).catch(() => {});
+    } catch (e){}
+  }
+}
+
+// Разблокировка обязана случиться в жесте. capture — раньше игровых обработчиков,
+// и до того, как меню/старт боя успеют что-то перерисовать.
+for (const ev of ['pointerdown', 'touchstart', 'touchend', 'click', 'keydown']){
+  window.addEventListener(ev, unlockAudio, { capture: true, passive: true });
 }
 
 function getNoise(){
@@ -494,7 +543,15 @@ function superCrack(gain, delay){
 }
 
 function sfx(name){
-  if (!AC || AC.state !== 'running') return;
+  if (!AC) return;
+  if (AC.state !== 'running'){
+    // контекст мог уснуть после звонка/сворачивания — пробуем вернуть
+    try {
+      const p = AC.resume();
+      if (p && p.catch) p.catch(() => {});
+    } catch (e){}
+    return;
+  }
   const v = 1 + rand(-0.045, 0.045); // живая нестабильность тона
   switch (name){
     case 'pistol':
@@ -4419,7 +4476,8 @@ function drawBullets(){
   ctx.globalCompositeOperation = 'lighter';
   for (const b of bullets){
     const a = Math.atan2(b.vy, b.vx);
-    const core = b.crit ? 1.15 : 0.9;
+    // визуал обычной пули уменьшен в 1.5 раза (хитбокс b.r и баланс не меняются)
+    const core = (b.crit ? 1.15 : 0.9) / 1.5;
     const col = b.color || '#fff6d8';
 
     // ---- рейлган: длинный светящийся луч ----
@@ -4500,7 +4558,7 @@ function drawBullets(){
 
     // три затухающих круглых следа вместо трассера
     for (let i = 3; i >= 1; i--){
-      const d = i * (b.crit ? 7.5 : 6.5);
+      const d = i * (b.crit ? 7.5 : 6.5) / 1.5;
       const fade = 0.34 / i;
       ctx.fillStyle = b.fire
         ? 'rgba(255,140,40,' + fade.toFixed(2) + ')'
@@ -4512,13 +4570,13 @@ function drawBullets(){
 
     // мягкий ореол вокруг пули
     ctx.fillStyle = hexA(col, 0.09);
-    ctx.beginPath(); ctx.arc(b.x, b.y, 7.5, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(b.x, b.y, 7.5 / 1.5, 0, TAU); ctx.fill();
     ctx.fillStyle = hexA(col, 0.26);
-    ctx.beginPath(); ctx.arc(b.x, b.y, 4.2, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(b.x, b.y, 4.2 / 1.5, 0, TAU); ctx.fill();
 
     // тонкое цветное кольцо — пуля читается на тёмном полу
     ctx.strokeStyle = hexA(col, 0.55);
-    ctx.lineWidth = 0.8;
+    ctx.lineWidth = 0.8 / 1.5;
     ctx.beginPath(); ctx.arc(b.x, b.y, core * 2.2, 0, TAU); ctx.stroke();
 
     // ядро
