@@ -4755,46 +4755,53 @@ function drawLighting(vx, vy){
   lctx.fillRect(0, 0, cw, ch);
 
   lctx.globalCompositeOperation = 'destination-out';
-  const px = player.x - vx;
-  const py = player.y - vy;
+  // Слой света живёт в экранных пикселях, а мир рисуется с масштабом zoom.
+  // Поэтому все мировые координаты и радиусы обязаны умножаться на zoom,
+  // иначе на телефоне (zoom < 1) фонарь и лампы «уезжают» от объектов.
+  const z = zoom;
+  const px = (player.x - vx) * z;
+  const py = (player.y - vy) * z;
 
   // общий сумрак вокруг игрока (силуэты в темноте)
-  eraseLight(px, py, 200, 0.92);
-  eraseLight(px, py, 430, 0.50);
+  eraseLight(px, py, 200 * z, 0.92);
+  eraseLight(px, py, 430 * z, 0.50);
 
   // конус фонаря
+  const coneR = 760 * z;
   lctx.save();
   lctx.beginPath();
   lctx.moveTo(px, py);
-  lctx.arc(px, py, 760, player.aim - 0.66, player.aim + 0.66);
+  lctx.arc(px, py, coneR, player.aim - 0.66, player.aim + 0.66);
   lctx.closePath();
   lctx.clip();
-  const cone = lctx.createRadialGradient(px, py, 24, px, py, 760);
+  const cone = lctx.createRadialGradient(px, py, 24 * z, px, py, coneR);
   cone.addColorStop(0, 'rgba(0,0,0,1)');
   cone.addColorStop(0.45, 'rgba(0,0,0,0.88)');
   cone.addColorStop(0.8, 'rgba(0,0,0,0.34)');
   cone.addColorStop(1, 'rgba(0,0,0,0)');
   lctx.fillStyle = cone;
-  lctx.fillRect(px - 800, py - 800, 1600, 1600);
+  lctx.fillRect(px - 800 * z, py - 800 * z, 1600 * z, 1600 * z);
   lctx.restore();
 
   for (const L of lamps){
-    eraseLight(L.x - vx, L.y - vy, L.r, 0.92);
-    eraseLight(L.x - vx, L.y - vy, L.r * 0.45, 1);
+    const lx = (L.x - vx) * z, ly = (L.y - vy) * z, lr = L.r * z;
+    eraseLight(lx, ly, lr, 0.92);
+    eraseLight(lx, ly, lr * 0.45, 1);
   }
   for (const f of flashes){
-    eraseLight(f.x - vx, f.y - vy, f.size * 3.2, 0.95);
+    eraseLight((f.x - vx) * z, (f.y - vy) * z, f.size * 3.2 * z, 0.95);
   }
   // подсветка от выстрелов-трассеров (на телефоне пропускаем — дорого)
   if (!IS_MOBILE){
     const nb = Math.min(bullets.length, 14);
     for (let i = 0; i < nb; i += 2){
       const b = bullets[i];
-      eraseLight(b.x - vx, b.y - vy, 58, 0.30);
+      eraseLight((b.x - vx) * z, (b.y - vy) * z, 58 * z, 0.30);
     }
   }
   for (const g of grenades){
-    eraseLight(g.x - vx, g.y - g.z - vy, g.fuse < 0.45 ? 70 : 46, g.fuse < 0.45 ? 0.5 : 0.3);
+    eraseLight((g.x - vx) * z, (g.y - g.z - vy) * z,
+      (g.fuse < 0.45 ? 70 : 46) * z, g.fuse < 0.45 ? 0.5 : 0.3);
   }
 
   lctx.globalCompositeOperation = 'source-over';
@@ -4808,24 +4815,26 @@ function drawLighting(vx, vy){
 
   ctx.drawImage(lightCanvas, vx, vy, viewW(), viewH());
 
-  // тёплые пятна света аддитивно
+  // тёплые пятна света аддитивно — рисуем в мировых координатах,
+  // потому что контекст всё ещё сдвинут камерой (-vx, -vy)
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   for (const L of lamps){
-    const x = L.x - vx, y = L.y - vy;
-    if (x < -L.r || y < -L.r || x > viewW() + L.r || y > viewH() + L.r) continue;
+    if (L.x < vx - L.r || L.y < vy - L.r ||
+        L.x > vx + viewW() + L.r || L.y > vy + viewH() + L.r) continue;
     // спрайт вместо градиента: кэш + один blit
-    ctx.drawImage(glowSprite(L.warm ? '#ffaa50' : '#6ed2c8', 0.16), x - L.r, y - L.r, L.r * 2, L.r * 2);
+    ctx.drawImage(glowSprite(L.warm ? '#ffaa50' : '#6ed2c8', 0.16),
+      L.x - L.r, L.y - L.r, L.r * 2, L.r * 2);
   }
   // подсветка от фонаря игрока (мягкий холодный ореол)
-  const hx = player.x - vx, hy = player.y - vy;
   const hs = glowSprite('#aacdc6', 0.16);
-  ctx.drawImage(hs, hx - 560, hy - 560, 1120, 1120);
+  ctx.drawImage(hs, player.x - 560, player.y - 560, 1120, 1120);
 
   for (const f of flashes){
     const t = f.life / f.max;
     ctx.globalAlpha = 0.30 * t;
-    ctx.drawImage(glowSprite('#ffc878', 1), f.x - vx - f.size * 3, f.y - vy - f.size * 3, f.size * 6, f.size * 6);
+    ctx.drawImage(glowSprite('#ffc878', 1),
+      f.x - f.size * 3, f.y - f.size * 3, f.size * 6, f.size * 6);
     ctx.globalAlpha = 1;
   }
   ctx.restore();
@@ -6429,7 +6438,7 @@ cam.y = clamp(WORLD.h / 2 - viewH() / 2, 0, Math.max(0, WORLD.h - viewH()));
 requestAnimationFrame(frame);
 
 // отладочный автозапуск: index.html?auto
-window.__ds = { player, state, zombies, bullets, enemyBullets, pickups, gibs, pools, texts, particles, shockwaves, grenades, mines, cam, view, screenBlood, SAFE, safeW, safeCx, startGame, openSelect, selectHero, cycleSelect, heroCardRect, heroCardAt, selectTabRect, mobileSelectLayout, mobileLayout, touch, viewW, viewH, zoom: () => zoom, renderScale: () => renderScale, setRenderScale, dpr: () => dpr, IS_MOBILE, shoot, dash, update, beginWave, spawnZombie, spawnPickup, applyPickup, dropLoot, hurtPlayer, throwGrenade, explode, damageZombie, killZombie, pickType, bossForWave, BOSS_LIST, ENEMY_SPECS, ENEMY_NAMES, ENEMY_UNLOCKS, WEAPONS, GUN_ORDER, HEROES, HERO_ORDER, FONT, sfx, switchWeapon, rocketBoom, mineBoom, bushes, walls, toxicBurst, bomberBoom, shootAcid, findFreeSpot, pointInWall, clearWave };
+window.__ds = { player, state, zombies, bullets, enemyBullets, pickups, gibs, pools, texts, particles, shockwaves, grenades, mines, cam, view, lamps, screenBlood, SAFE, safeW, safeCx, startGame, openSelect, selectHero, cycleSelect, heroCardRect, heroCardAt, selectTabRect, mobileSelectLayout, mobileLayout, touch, viewW, viewH, zoom: () => zoom, renderScale: () => renderScale, setRenderScale, dpr: () => dpr, IS_MOBILE, shoot, dash, update, beginWave, spawnZombie, spawnPickup, applyPickup, dropLoot, hurtPlayer, throwGrenade, explode, damageZombie, killZombie, pickType, bossForWave, BOSS_LIST, ENEMY_SPECS, ENEMY_NAMES, ENEMY_UNLOCKS, WEAPONS, GUN_ORDER, HEROES, HERO_ORDER, FONT, sfx, switchWeapon, rocketBoom, mineBoom, bushes, walls, toxicBurst, bomberBoom, shootAcid, findFreeSpot, pointInWall, clearWave };
 if (new URLSearchParams(location.search).has('auto')) startGame();
 </script>
 </body>
