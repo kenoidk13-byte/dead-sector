@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#070a09">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="format-detection" content="telephone=no">
+<title>Зомби Ниндзя — режь головы</title>
+<style>
+  :root{
+    --ink:#e9f3e4;
+    --dim:#91a38d;
+    --acid:#a7f04d;
+    --blood:#ff4b3e;
+    --panel:rgba(10,14,12,.86);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+  html,body{margin:0;height:100%;height:100dvh;overflow:hidden;overscroll-behavior:none;
+    background:#070a09;color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  button{touch-action:manipulation}
+  #game{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:crosshair}
+
+  #hud{position:fixed;top:0;left:0;right:0;padding:calc(env(safe-area-inset-top) + 12px) 16px 0;
+    display:flex;align-items:flex-start;gap:14px;pointer-events:none;z-index:5}
+  .stat{background:rgba(8,12,10,.55);border:1px solid rgba(167,240,77,.16);border-radius:12px;
+    padding:7px 12px;backdrop-filter:blur(8px);min-width:74px}
+  .stat b{display:block;font-size:22px;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+  .stat span{display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-top:4px}
+  .stat.best b{color:var(--acid)}
+  #hearts{font-size:20px;letter-spacing:2px;line-height:26px}
+  #timer{margin-left:auto;text-align:right}
+  #combo{position:fixed;left:50%;top:26%;transform:translate(-50%,-50%) scale(.6);z-index:6;
+    font-weight:900;font-size:clamp(30px,7vw,64px);color:var(--acid);opacity:0;pointer-events:none;
+    text-shadow:0 0 24px rgba(167,240,77,.6),0 4px 0 #0b1a06;white-space:nowrap}
+  #combo.pop{animation:pop .5s cubic-bezier(.2,1.6,.4,1) forwards}
+  @keyframes pop{0%{opacity:0;transform:translate(-50%,-50%) scale(.5) rotate(-8deg)}
+    25%{opacity:1;transform:translate(-50%,-50%) scale(1.12) rotate(3deg)}
+    70%{opacity:1;transform:translate(-50%,-50%) scale(1) rotate(0)}
+    100%{opacity:0;transform:translate(-50%,-90%) scale(1)}}
+
+  .overlay{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;
+    padding:20px;background:radial-gradient(ellipse at 50% 35%,rgba(12,22,14,.55),rgba(3,5,4,.9) 75%)}
+  .overlay.hidden{display:none}
+  .card{width:min(560px,100%);background:var(--panel);border:1px solid rgba(167,240,77,.22);
+    border-radius:22px;padding:30px 26px;text-align:center;box-shadow:0 30px 90px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.05)}
+  .logo{font-weight:900;font-size:clamp(38px,9vw,68px);line-height:.94;letter-spacing:-.04em;margin:0 0 6px;
+    text-shadow:0 0 40px rgba(167,240,77,.25)}
+  .logo em{font-style:normal;color:var(--acid)}
+  .tag{color:var(--dim);font-size:14px;margin:0 0 24px}
+  .modes{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}
+  .mode{appearance:none;border:1px solid rgba(167,240,77,.18);background:rgba(167,240,77,.05);
+    color:var(--ink);border-radius:14px;padding:14px 6px;cursor:pointer;transition:.16s;font:inherit}
+  .mode:hover{border-color:rgba(167,240,77,.55);transform:translateY(-2px)}
+  .mode.on{background:rgba(167,240,77,.16);border-color:var(--acid);box-shadow:0 0 0 1px rgba(167,240,77,.25) inset}
+  .mode b{display:block;font-size:15px}
+  .mode small{display:block;color:var(--dim);font-size:11px;margin-top:5px;line-height:1.3}
+  .go{width:100%;appearance:none;border:0;border-radius:14px;padding:16px;cursor:pointer;font:inherit;
+    font-weight:800;font-size:18px;color:#0b1407;background:linear-gradient(180deg,#c3ff6e,#8ee23d);
+    box-shadow:0 8px 24px rgba(142,226,61,.25);transition:.15s}
+  .go:hover{filter:brightness(1.08);transform:translateY(-1px)}
+  .hint{color:var(--dim);font-size:12px;margin:16px 0 0;line-height:1.6}
+  .hint strong{color:var(--ink)}
+  .bigscore{font-size:56px;font-weight:900;color:var(--acid);line-height:1;margin:8px 0 2px;font-variant-numeric:tabular-nums}
+  .reason{color:var(--dim);font-size:14px;margin:0 0 18px}
+  #sound{position:fixed;right:14px;bottom:calc(env(safe-area-inset-bottom) + 14px);z-index:12;
+    width:42px;height:42px;border-radius:50%;border:1px solid rgba(167,240,77,.25);
+    background:rgba(8,12,10,.6);color:var(--ink);font-size:18px;cursor:pointer;backdrop-filter:blur(8px)}
+  #flash{position:fixed;inset:0;pointer-events:none;z-index:7;opacity:0;transition:opacity .2s}
+  #flash.hit{opacity:1;transition:none;background:rgba(255,59,48,.22)}
+  #flash.boom{opacity:1;transition:none;background:rgba(255,120,30,.4)}
+
+  /* ---------- телефон ---------- */
+  @media (max-width:560px){
+    #hud{gap:7px;padding:calc(env(safe-area-inset-top) + 9px) 9px 0}
+    .stat{min-width:0;padding:6px 8px;border-radius:10px;backdrop-filter:blur(6px)}
+    .stat b{font-size:18px}
+    .stat span{font-size:8px;letter-spacing:.1em;margin-top:3px}
+    #hearts{font-size:15px;letter-spacing:1px;line-height:19px;white-space:nowrap}
+    #combo{top:30%;font-size:clamp(30px,11vw,52px)}
+    .overlay{padding:calc(env(safe-area-inset-top) + 10px) 12px calc(env(safe-area-inset-bottom) + 10px)}
+    .card{width:100%;max-height:100%;overflow:auto;border-radius:18px;padding:20px 16px}
+    .logo{font-size:clamp(34px,11vw,52px)}
+    .tag{font-size:12px;margin:0 0 14px;line-height:1.4}
+    .modes{grid-template-columns:1fr;gap:8px;margin-bottom:12px}
+    .mode{display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;
+      min-height:58px;padding:10px 14px;border-radius:12px}
+    .mode b{font-size:16px;white-space:nowrap}
+    .mode small{font-size:11px;margin:0;text-align:right;line-height:1.3}
+    .go{min-height:56px;font-size:17px;border-radius:12px}
+    .hint{font-size:11px;margin-top:12px;line-height:1.5}
+    .bigscore{font-size:48px}
+    #sound{width:44px;height:44px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 12px)}
+  }
+  @media (max-width:560px) and (max-height:680px){
+    .card{padding:14px}
+    .logo{font-size:32px}
+    .tag{margin-bottom:8px}
+    .mode{min-height:50px;padding:8px 12px}
+    .hint{font-size:10px;margin-top:8px}
+  }
+  @media (orientation:landscape) and (max-height:480px){
+    .card{width:min(720px,100%);padding:14px 18px}
+    .logo{font-size:34px}
+    .tag{margin-bottom:8px}
+    .modes{grid-template-columns:repeat(3,1fr);gap:8px}
+    .mode{display:block;text-align:center;min-height:0;padding:8px 4px}
+    .mode b{font-size:13px}
+    .mode small{display:block;margin-top:3px;text-align:center;font-size:10px}
+    .hint{margin-top:8px;font-size:10px}
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div class="stat"><b id="score">0</b><span>очки</span></div>
+  <div class="stat best"><b id="best">0</b><span>рекорд</span></div>
+  <div class="stat"><b id="hearts">♥♥♥</b><span>жизни</span></div>
+  <div class="stat" id="timer"><b id="clock">—</b><span>время</span></div>
+</div>
+<div id="combo"></div>
+<div id="flash"></div>
+<button id="sound" title="Звук">🔊</button>
+
+<div class="overlay" id="start">
+  <div class="card">
+    <h1 class="logo">ЗОМБИ<em>НИНДЗЯ</em></h1>
+    <p class="tag">Веди пальцем или мышью — и руби зомби-головы, пока не кончились жизни.</p>
+    <div class="modes">
+      <button class="mode on" data-mode="classic"><b>Классика</b><small>3 промаха<br>бомбы смертельны</small></button>
+      <button class="mode" data-mode="arcade"><b>Аркада</b><small>60 секунд<br>набирай максимум</small></button>
+      <button class="mode" data-mode="zen"><b>Дзен</b><small>без бомб<br>и без проигрыша</small></button>
+    </div>
+    <button class="go" id="startBtn">НАЧАТЬ РЕЗАТЬ</button>
+    <p class="hint"><strong>Режь</strong> зомби — +10 очков. <strong>Не трогай</strong> чёрные черепа с фитилём.<br>Несколько голов одним движением = комбо и бонус.</p>
+  </div>
+</div>
+
+<div class="overlay hidden" id="over">
+  <div class="card">
+    <h1 class="logo" id="overTitle">ПОРАЗ</h1>
+    <div class="bigscore" id="finalScore">0</div>
+    <p class="reason" id="reason">Головы победили.</p>
+    <button class="go" id="againBtn">ЕЩЁ РАЗ</button>
+    <p class="hint">Нажми, чтобы вернуться в меню и сменить режим.</p>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+const cv = document.getElementById('game');
+const ctx = cv.getContext('2d');
+const $ = id => document.getElementById(id);
+const ui = {score:$('score'), best:$('best'), hearts:$('hearts'), clock:$('clock'), combo:$('combo'),
+  start:$('start'), over:$('over'), flash:$('flash'), sound:$('sound')};
+
+let W = 0, H = 0, DPR = 1, bg = null, mobile = false;
+let mode = 'classic', state = 'menu';
+let score = 0, best = +(localStorage.getItem('zombieNinjaBest') || 0);
+let lives = 3, timeLeft = 60, comboCount = 0, comboLast = 0;
+let heads = [], halves = [], goo = [], pops = [], trails = [], booms = [];
+let spawnTimer = 0, last = 0, shake = 0, muted = false, audio = null, wakeLock = null;
+const pointer = {down:false, x:0, y:0, px:0, py:0, id:null};
+
+/* ---------- фон (рисуется один раз при изменении размера) ---------- */
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  mobile = matchMedia('(pointer:coarse)').matches || W < 600;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  bg = document.createElement('canvas');
+  bg.width = cv.width; bg.height = cv.height;
+  const g = bg.getContext('2d');
+  g.setTransform(DPR,0,0,DPR,0,0);
+  drawBackground(g);
+}
+function drawBackground(g){
+  const sky = g.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,'#111d1d'); sky.addColorStop(.55,'#0b1412'); sky.addColorStop(1,'#050806');
+  g.fillStyle = sky; g.fillRect(0,0,W,H);
+
+  // луна
+  const mx = W*.78, my = H*.18, mr = Math.min(W,H)*.075;
+  const glow = g.createRadialGradient(mx,my,mr*.4,mx,my,mr*4);
+  glow.addColorStop(0,'rgba(196,255,178,.20)'); glow.addColorStop(1,'rgba(196,255,178,0)');
+  g.fillStyle = glow; g.fillRect(mx-mr*4,my-mr*4,mr*8,mr*8);
+  g.fillStyle = '#d8e9c4'; g.beginPath(); g.arc(mx,my,mr,0,7); g.fill();
+  g.fillStyle = 'rgba(120,150,110,.18)';
+  for (let i=0;i<7;i++){
+    const a = i*1.7, d = mr*(.2+((i*37)%60)/100);
+    g.beginPath(); g.arc(mx+Math.cos(a)*d, my+Math.sin(a)*d, mr*(.08+(i%3)*.04),0,7); g.fill();
+  }
+
+  // далёе деревья
+  g.fillStyle = '#070d0a';
+  for (let i=0;i<13;i++){
+    const x = (i/12)*W + Math.sin(i*9)*30, y = H*.72 + (i%3)*12;
+    g.fillRect(x-3,y-H*.16,6,H*.2);
+    g.beginPath(); g.arc(x,y-H*.19,H*.045,0,7); g.arc(x-H*.035,y-H*.13,H*.035,0,7);
+    g.arc(x+H*.035,y-H*.12,H*.04,0,7); g.fill();
+  }
+
+  // земля
+  const ground = g.createLinearGradient(0,H*.76,0,H);
+  ground.addColorStop(0,'#0c1510'); ground.addColorStop(1,'#040705');
+  g.fillStyle = ground; g.beginPath(); g.moveTo(0,H*.8);
+  for (let x=0;x<=W;x+=30) g.lineTo(x,H*.8 + Math.sin(x*.013)*8 + Math.sin(x*.031)*4);
+  g.lineTo(W,H); g.lineTo(0,H); g.fill();
+
+  // могилы
+  for (let i=0;i<9;i++){
+    const x = W*(i+.5)/9 + Math.sin(i*4)*22, y = H*.83 + (i%2)*16, s = .7+(i%3)*.2;
+    g.fillStyle = '#1a241d';
+    g.beginPath(); g.moveTo(x-20*s,y); g.lineTo(x-20*s,y-30*s);
+    g.arc(x,y-30*s,20*s,Math.PI,0); g.lineTo(x+20*s,y); g.closePath(); g.fill();
+    g.fillStyle = '#2a362c'; g.fillRect(x-2*s,y-42*s,4*s,24*s); g.fillRect(x-10*s,y-34*s,20*s,4*s);
+  }
+
+  // туман
+  for (let i=0;i<4;i++){
+    const fy = H*(.62+i*.1), fg = g.createLinearGradient(0,fy-40,0,fy+50);
+    fg.addColorStop(0,'rgba(150,190,150,0)');
+    fg.addColorStop(.5,`rgba(130,175,135,${.045 - i*.008})`);
+    fg.addColorStop(1,'rgba(150,190,150,0)');
+    g.fillStyle = fg; g.fillRect(0,fy-40,W,90);
+  }
+  // виньетка
+  const v = g.createRadialGradient(W/2,H/2,Math.min(W,H)*.35,W/2,H/2,Math.max(W,H)*.75);
+  v.addColorStop(0,'rgba(0,0,0,0)'); v.addColorStop(1,'rgba(0,0,0,.65)');
+  g.fillStyle = v; g.fillRect(0,0,W,H);
+}
+
+/* ---------- звук ---------- */
+function ac(){
+  if (!audio) { try { audio = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){} }
+  if (audio && audio.state === 'suspended') audio.resume();
+  return audio;
+}
+function noise(dur, filterFreq, gain, type){
+  const a = ac(); if (!a || muted) return;
+  const n = Math.floor(a.sampleRate*dur), buf = a.createBuffer(1,n,a.sampleRate), d = buf.getChannelData(0);
+  for (let i=0;i<n;i++) d[i] = (Math.random()*2-1) * (1-i/n);
+  const src = a.createBufferSource(); src.buffer = buf;
+  const f = a.createBiquadFilter(); f.type = type||'bandpass'; f.frequency.value = filterFreq; f.Q.value = .8;
+  const g = a.createGain(); g.gain.value = gain;
+  src.connect(f).connect(g).connect(a.destination); src.start();
+}
+function tone(freq, dur, gain, wave, slide){
+  const a = ac(); if (!a || muted) return;
+  const o = a.createOscillator(), g = a.createGain();
+  o.type = wave||'sine'; o.frequency.setValueAtTime(freq,a.currentTime);
+  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30,slide),a.currentTime+dur);
+  g.gain.setValueAtTime(gain,a.currentTime);
+  g.gain.exponentialRampToValueAtTime(.001,a.currentTime+dur);
+  o.connect(g).connect(a.destination); o.start(); o.stop(a.currentTime+dur);
+}
+const sfx = {
+  slice(){ noise(.14,2600,.16); tone(680,.1,.05,'triangle',240); },
+  splat(){ noise(.22,420,.2,'lowpass'); tone(120,.16,.09,'sine',55); },
+  combo(n){ tone(440+n*70,.16,.07,'triangle',900+n*80); },
+  miss(){ tone(180,.28,.09,'sawtooth',70); },
+  boom(){ noise(.6,180,.4,'lowpass'); tone(90,.6,.2,'sawtooth',30); },
+  start(){ tone(330,.12,.06,'square',660); }
+};
+function buzz(pattern){ try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(_){} }
+
+/* ---------- игровые объекты ---------- */
+const TYPES = {
+  green : {skin:'#86c45e', dark:'#4d8a37', eye:'#ffe066', pupil:'#14180f', mouth:'#3a1a18', w:36, score:10},
+  gray  : {skin:'#9ca89b', dark:'#5f6b5d', eye:'#ff6b5b', pupil:'#1a0f0d', mouth:'#2b1e1a', w:34, score:15},
+  runner: {skin:'#b8dd6a', dark:'#71913c', eye:'#ff4b3e', pupil:'#200b09', mouth:'#431012', w:30, score:20},
+  gold  : {skin:'#f0d271', dark:'#a9812f', eye:'#ffffff', pupil:'#4a3208', mouth:'#5a3710', w:38, score:50}
+};
+function head(kind, x, y, vx, vy){
+  return {kind, x, y, vx, vy, r:TYPES[kind].w, rot:Math.random()*6, spin:(Math.random()-.5)*7,
+    born:performance.now(), dead:false};
+}
+function bomb(x,y,vx,vy){ return {kind:'bomb',x,y,vx,vy,r:34,rot:Math.random()*6,spin:(Math.random()-.5)*5,dead:false}; }
+
+function spawnWave(){
+  const diff = Math.min(1, score/700);
+  const count = Math.random() < .28+diff*.3 ? 2 + (Math.random()<.18+diff*.15?1:0) : 1;
+  const dir = Math.random()<.5 ? 1 : -1;
+  const spread = Math.min(56, W*.14);
+  const baseX = W*(dir>0?.16:.84) + (Math.random()-.5)*W*.12;
+  // скорость подбирается так, чтобы апогей был в верхней трети экрана —
+  // одинаково хорошо работает и в портрете, и на десктопе
+  const power = Math.sqrt(2*1350*(H*.72+60));
+  const vx = dir * (W*.10 + Math.random()*W*.14);
+  const vy = -power*(.92+Math.random()*.14);
+  for (let i=0;i<count;i++){
+    let kind = 'green';
+    const r = Math.random();
+    if (r < .17) kind = 'gray';
+    else if (r < .28 && score>60) kind = 'runner';
+    else if (r < .315 && score>120) kind = 'gold';
+    const h = head(kind, baseX + i*dir*spread, H+50+i*18,
+      vx*(.85+i*.09) + (Math.random()-.5)*40, vy*(1-i*.045));
+    heads.push(h);
+  }
+  if (mode!=='zen' && score>90 && Math.random() < .1+diff*.16){
+    heads.push(bomb(W*(Math.random()<.5?.22:.78)+(Math.random()-.5)*W*.1, H+50,
+      (Math.random()-.5)*W*.2, -power*(.95+Math.random()*.12)));
+  }
+}
+
+/* ---------- отрисовка головы ---------- */
+function drawZombie(g, t, r, now){
+  const P = TYPES[t];
+  // шея
+  g.fillStyle = P.dark;
+  g.beginPath(); g.ellipse(0,r*.83,r*.42,r*.3,0,0,7); g.fill();
+
+  // череп
+  const skin = g.createLinearGradient(-r,-r,r,r);
+  skin.addColorStop(0,P.skin); skin.addColorStop(1,P.dark);
+  g.fillStyle = skin;
+  g.beginPath();
+  g.moveTo(-r*.78,-r*.15);
+  g.bezierCurveTo(-r*.92,-r*.72,-r*.45,-r*1.02,0,-r*1.0);
+  g.bezierCurveTo(r*.5,-r*1.02,r*.92,-r*.68,r*.78,-r*.12);
+  g.bezierCurveTo(r*.74,r*.45,r*.42,r*.78,0,r*.78);
+  g.bezierCurveTo(-r*.44,r*.78,-r*.74,r*.45,-r*.78,-r*.15);
+  g.closePath(); g.fill();
+
+  // ухо
+  g.fillStyle = P.dark;
+  g.beginPath(); g.ellipse(-r*.78,r*.05,r*.18,r*.25,0,0,7); g.fill();
+
+  // волосы / повязка
+  g.fillStyle = t==='gold' ? '#8c641d' : (t==='gray' ? '#c8c9b6' : '#263a1d');
+  g.beginPath();
+  g.moveTo(-r*.8,-r*.42);
+  g.bezierCurveTo(-r*.7,-r*1.08,r*.2,-r*1.18,r*.78,-r*.62);
+  g.lineTo(r*.62,-r*.5); g.lineTo(r*.4,-r*.78); g.lineTo(r*.12,-r*.5);
+  g.lineTo(-r*.15,-r*.8); g.lineTo(-r*.42,-r*.48); g.closePath(); g.fill();
+  if (t==='gray'){
+    g.strokeStyle='rgba(90,80,60,.45)'; g.lineWidth=2;
+    for(let i=0;i<3;i++){ g.beginPath(); g.moveTo(-r*.7+i*r*.2,-r*.8); g.lineTo(-r*.5+i*r*.2,-r*.45); g.stroke(); }
+  }
+  if (t==='gold'){
+    g.fillStyle='#ffe98a';
+    g.beginPath(); g.moveTo(-r*.5,-r*.95); g.lineTo(-r*.35,-r*1.5); g.lineTo(-r*.1,-r*1.05);
+    g.lineTo(r*.1,-r*1.55); g.lineTo(r*.35,-r*1.02); g.lineTo(r*.5,-r*1.35);
+    g.lineTo(r*.5,-r*.9); g.closePath(); g.fill();
+  }
+
+  // глаза
+  const blink = (now/1000 + r) % 5 < .12;
+  for (const s of [-1,1]){
+    const ex = s*r*.32, ey = -r*.3;
+    g.fillStyle = P.eye;
+    g.beginPath(); g.ellipse(ex,ey,r*.2,blink?r*.025:r*.17,0,0,7); g.fill();
+    if (!blink){
+      g.fillStyle = P.pupil;
+      g.beginPath(); g.arc(ex+s*r*.04,ey+r*.03,r*.075,0,7); g.fill();
+      g.fillStyle = 'rgba(255,255,255,.75)';
+      g.beginPath(); g.arc(ex+s*r*.07,ey-r*.03,r*.025,0,7); g.fill();
+    }
+    g.strokeStyle = P.dark; g.lineWidth = r*.07; g.lineCap='round';
+    g.beginPath(); g.moveTo(ex-r*.22,ey-r*.24); g.lineTo(ex+r*.16,ey-r*.3); g.stroke();
+  }
+
+  // шрам
+  g.strokeStyle = P.dark; g.lineWidth = Math.max(1.5,r*.055);
+  g.beginPath(); g.moveTo(r*.5,-r*.6); g.lineTo(r*.3,-r*.05); g.stroke();
+  for(let i=0;i<2;i++){
+    g.beginPath(); g.moveTo(r*.42-i*r*.09,-r*.4+i*r*.13);
+    g.lineTo(r*.58-i*r*.07,-r*.43+i*r*.13); g.stroke();
+  }
+
+  // рот
+  g.fillStyle = P.mouth;
+  g.beginPath(); g.ellipse(0,r*.42,r*.38,t==='runner'?r*.28:r*.17,0,0,7); g.fill();
+  g.strokeStyle='#1a100e'; g.lineWidth=Math.max(1,r*.04);
+  g.beginPath(); g.moveTo(-r*.38,r*.42); g.lineTo(r*.38,r*.42); g.stroke();
+  g.fillStyle = '#efe9cf';
+  for(let i=-2;i<=2;i++){
+    if (i===-1||i===1) continue;
+    g.fillRect(i*r*.13-r*.045,r*.32,r*.09,r*.13);
+    if(t!=='runner') g.fillRect(i*r*.13-r*.045,r*.45,r*.09,r*.09);
+  }
+  // слюна
+  if (t==='runner'){
+    g.fillStyle='rgba(190,255,140,.6)';
+    g.beginPath(); g.moveTo(r*.3,r*.5); g.quadraticCurveTo(r*.42,r*.7,r*.28,r*.78);
+    g.quadraticCurveTo(r*.24,r*.62,r*.3,r*.5); g.fill();
+  }
+}
+function drawBomb(g,r,now){
+  const pulse = 1+Math.sin(now/90)*.06;
+  g.save(); g.scale(pulse,pulse);
+  const glow = g.createRadialGradient(0,0,r*.3,0,0,r*1.5);
+  glow.addColorStop(0,'rgba(255,60,20,.28)'); glow.addColorStop(1,'rgba(255,60,20,0)');
+  g.fillStyle=glow; g.fillRect(-r*1.5,-r*1.5,r*3,r*3);
+  g.fillStyle='#121417'; g.beginPath(); g.arc(0,0,r*.95,0,7); g.fill();
+  g.strokeStyle='#2e3538'; g.lineWidth=r*.08; g.stroke();
+  // фитиль
+  g.strokeStyle='#8d7a52'; g.lineWidth=r*.13; g.lineCap='round';
+  g.beginPath(); g.moveTo(0,-r*.9); g.quadraticCurveTo(r*.25,-r*1.4,r*.05,-r*1.6); g.stroke();
+  const sp = r*.18 + Math.sin(now/40)*r*.06;
+  g.fillStyle='#fff0a0'; g.beginPath(); g.arc(r*.05,-r*1.62,sp,0,7); g.fill();
+  g.fillStyle='#ff7a20'; g.beginPath(); g.arc(r*.05,-r*1.62,sp*.55,0,7); g.fill();
+  // череп
+  g.fillStyle='#e8e6dd';
+  g.beginPath(); g.arc(0,-r*.12,r*.5,Math.PI,0); g.lineTo(r*.42,r*.3);
+  g.lineTo(-r*.42,r*.3); g.closePath(); g.fill();
+  g.fillRect(-r*.3,r*.25,r*.6,r*.22);
+  g.fillStyle='#101214';
+  g.beginPath(); g.ellipse(-r*.21,-r*.13,r*.14,r*.17,0,0,7); g.fill();
+  g.beginPath(); g.ellipse(r*.21,-r*.13,r*.14,r*.17,0,0,7); g.fill();
+  for(let i=-1;i<=1;i++) g.fillRect(i*r*.17-r*.05,r*.26,r*.1,r*.2);
+  g.fillStyle='#c62828';
+  g.beginPath(); g.arc(-r*.21,-r*.13,r*.055,0,7); g.arc(r*.21,-r*.13,r*.055,0,7); g.fill();
+  g.restore();
+}
+
+/* ---------- резка ---------- */
+function sliceObject(o, angle){
+  o.dead = true;
+  const P = TYPES[o.kind] || {skin:'#888',dark:'#444'};
+  if (o.kind==='bomb'){
+    sfx.boom(); shake = 22; flash('boom'); buzz([80,50,160]);
+    for(let i=0;i<(mobile?46:90);i++) boomParticles(o.x,o.y);
+    setTimeout(()=>gameOver('Ты разрезал бомбу. Очень ниндзя, очень мертв.'),420);
+    return;
+  }
+  sfx.slice(); sfx.splat(); buzz(12);
+  comboCount = performance.now()-comboLast < 420 ? comboCount+1 : 1;
+  comboLast = performance.now();
+  const bonus = P.score + Math.max(0,comboCount-1)*5;
+  score += bonus;
+  showCombo();
+  popText(o.x,o.y-20,'+'+bonus, comboCount>1 ? '#a7f04d' : '#e9f3e4');
+  if (comboCount>=2){ sfx.combo(comboCount); buzz(18+Math.min(comboCount,5)*6); }
+
+  const nx = Math.cos(angle+Math.PI/2), ny = Math.sin(angle+Math.PI/2);
+  for (const side of [-1,1]){
+    halves.push({kind:o.kind, x:o.x, y:o.y, vx:o.vx + nx*side*155, vy:o.vy + ny*side*120 - 60,
+      r:o.r, rot:o.rot, spin:o.spin+side*4, side, angle, life:1});
+  }
+  const tint = o.kind==='gold' ? '#ffd76a' : (o.kind==='gray' ? '#7f8f7a' : '#8ee04a');
+  for(let i=0;i<(mobile?14:22);i++){
+    goo.push({x:o.x+(Math.random()-.5)*o.r, y:o.y+(Math.random()-.5)*o.r,
+      vx:(Math.random()-.5)*420+nx*side0(i)*100, vy:(Math.random()-.5)*380-90,
+      r:2+Math.random()*7, life:1, color: Math.random()<.2?'#ff5b4a':tint});
+  }
+  for(let i=0;i<(mobile?6:10);i++) boomParticles(o.x,o.y,'#cfe8b5',.4);
+  if (goo.length>260) goo.splice(0,goo.length-260);
+  syncHUD();
+}
+function side0(i){ return i%2?1:-1; }
+function boomParticles(x,y,color,power){
+  const a = Math.random()*7, v = (100+Math.random()*560)*(power||1);
+  goo.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,
+    r:2+Math.random()*8,life:1,color:color||(Math.random()<.5?'#ff8a2b':'#ffd35e')});
+}
+
+function distToSegment(px,py,x1,y1,x2,y2){
+  const dx=x2-x1, dy=y2-y1, l=dx*dx+dy*dy;
+  if(l===0) return Math.hypot(px-x1,py-y1);
+  let t=((px-x1)*dx+(py-y1)*dy)/l; t=Math.max(0,Math.min(1,t));
+  return Math.hypot(px-(x1+t*dx),py-(y1+t*dy));
+}
+function swipe(x1,y1,x2,y2){
+  const len = Math.hypot(x2-x1,y2-y1);
+  if (len<6) return;
+  const angle = Math.atan2(y2-y1,x2-x1);
+  for (const o of heads){
+    if (o.dead) continue;
+    if (distToSegment(o.x,o.y,x1,y1,x2,y2) < o.r*.92) sliceObject(o,angle);
+  }
+}
+
+/* ---------- эффекты ---------- */
+function popText(x,y,text,color){ pops.push({x,y,text,color,life:1,vy:-70}); }
+function showCombo(){
+  if (comboCount<2) return;
+  ui.combo.textContent = '×'+comboCount+'  КОМБО!';
+  ui.combo.classList.remove('pop'); void ui.combo.offsetWidth; ui.combo.classList.add('pop');
+}
+function flash(kind){
+  ui.flash.className = kind;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{ ui.flash.className=''; }));
+}
+
+/* ---------- цикл ---------- */
+function update(dt, now){
+  if (state!=='play') return;
+  spawnTimer -= dt;
+  if (spawnTimer<=0){ spawnWave(); spawnTimer = Math.max(.42, 1.15 - score/1400) * (.8+Math.random()*.45); }
+
+  if (mode==='arcade'){
+    timeLeft -= dt;
+    if (timeLeft<=0){ timeLeft=0; syncHUD(); gameOver('Время вышло!'); return; }
+  }
+
+  for (const o of heads){
+    o.vy += 1350*dt;
+    o.x += o.vx*dt; o.y += o.vy*dt; o.rot += o.spin*dt;
+    if (!o.dead && o.y-o.r > H+30){
+      o.dead = true;
+      if (o.kind!=='bomb' && mode!=='zen'){
+        lives--; comboCount=0; sfx.miss(); flash('hit'); buzz([30,40,30]); syncHUD();
+        if (lives<=0){ gameOver('Головы 너무 живучи.'); return; }
+      }
+    }
+  }
+  heads = heads.filter(o=>!o.dead);
+
+  for (const h of halves){
+    h.vy += 1100*dt; h.x += h.vx*dt; h.y += h.vy*dt; h.rot += h.spin*dt;
+    h.life -= dt*.32;
+  }
+  halves = halves.filter(h=>h.life>0 && h.y<H+120);
+  for (const p of goo){
+    p.vy += 900*dt; p.x += p.vx*dt; p.y += p.vy*dt; p.life -= dt*1.05;
+  }
+  goo = goo.filter(p=>p.life>0);
+  for (const p of pops){ p.y += p.vy*dt; p.life -= dt*.85; }
+  pops = pops.filter(p=>p.life>0);
+  for (const t of trails) t.life -= dt*3.4;
+  trails = trails.filter(t=>t.life>0);
+  shake *= Math.pow(.001,dt);
+  if (comboCount && now-comboLast>700) comboCount=0;
+}
+function render(now){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  const sx = shake ? (Math.random()-.5)*shake : 0, sy = shake ? (Math.random()-.5)*shake : 0;
+  ctx.clearRect(0,0,W,H);
+  ctx.save(); ctx.translate(sx,sy);
+  ctx.drawImage(bg,0,0,W,H);
+
+  // половинки
+  for (const h of halves){
+    ctx.save(); ctx.translate(h.x,h.y); ctx.rotate(h.rot+h.angle);
+    ctx.beginPath();
+    if (h.side<0) ctx.rect(-h.r*1.6,-h.r*1.8,h.r*1.6,h.r*3.6);
+    else ctx.rect(0,-h.r*1.8,h.r*1.6,h.r*3.6);
+    ctx.clip(); ctx.globalAlpha = Math.max(0,h.life);
+    drawZombie(ctx,h.kind,h.r,now);
+    ctx.restore();
+  }
+  // головы
+  for (const o of heads){
+    ctx.save(); ctx.translate(o.x,o.y); ctx.rotate(o.rot);
+    if (o.kind==='bomb') drawBomb(ctx,o.r,now); else drawZombie(ctx,o.kind,o.r,now);
+    ctx.restore();
+  }
+  // брызги
+  for (const p of goo){
+    ctx.globalAlpha = Math.max(0,p.life);
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.ellipse(p.x,p.y,p.r,p.r*(1+Math.abs(p.vy)/600),0,0,7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  // цифры очков
+  for (const p of pops){
+    ctx.globalAlpha = Math.max(0,p.life);
+    ctx.font = '800 22px -apple-system, system-ui, sans-serif';
+    ctx.textAlign='center'; ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillText(p.text,p.x+2,p.y+2);
+    ctx.fillStyle=p.color; ctx.fillText(p.text,p.x,p.y);
+  }
+  ctx.globalAlpha = 1;
+  // след лезвия
+  if (trails.length>1){
+    ctx.save(); ctx.lineCap='round'; ctx.lineJoin='round'; ctx.globalCompositeOperation='lighter';
+    for(let i=1;i<trails.length;i++){
+      const a=trails[i-1], b=trails[i], k=b.life;
+      ctx.strokeStyle=`rgba(190,255,160,${k*.8})`;
+      ctx.shadowColor='rgba(150,255,110,.9)'; ctx.shadowBlur=(mobile?9:18)*k;
+      ctx.lineWidth=2+16*k;
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+      ctx.strokeStyle=`rgba(255,255,255,${k*.9})`; ctx.lineWidth=1+4*k; ctx.shadowBlur=0;
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+function frame(now){
+  const dt = Math.min(.045,(now-last)/1000||0); last=now;
+  update(dt,now); render(now);
+  requestAnimationFrame(frame);
+}
+
+/* ---------- управление ---------- */
+function syncHUD(){
+  ui.score.textContent = score;
+  ui.best.textContent = Math.max(best,score);
+  ui.hearts.textContent = mode==='zen' ? '∞' : '♥'.repeat(Math.max(0,lives)) + '♡'.repeat(Math.max(0,3-lives));
+  ui.hearts.style.color = lives===1 && mode!=='zen' ? 'var(--blood)' : '';
+  ui.clock.textContent = mode==='arcade' ? Math.ceil(timeLeft)+' с' : (mode==='zen'?'∞':'—');
+}
+function startGame(){
+  ac(); sfx.start();
+  if (mobile){
+    try {
+      const el = document.documentElement;
+      if (el.requestFullscreen) el.requestFullscreen().catch(()=>{});
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    } catch(_){}
+    try {
+      if (navigator.wakeLock) navigator.wakeLock.request('screen').then(l=>{wakeLock=l;}).catch(()=>{});
+    } catch(_){}
+  }
+  score=0; lives=3; timeLeft=60; comboCount=0; spawnTimer=.35;
+  heads=[]; halves=[]; goo=[]; pops=[]; trails=[]; shake=0;
+  state='play'; ui.start.classList.add('hidden'); ui.over.classList.add('hidden');
+  syncHUD();
+}
+function gameOver(reason){
+  if (state!=='play') return;
+  state='over';
+  const isRecord = score>best && score>0;
+  if (isRecord){ best=score; localStorage.setItem('zombieNinjaBest',String(best)); }
+  $('overTitle').innerHTML = isRecord ? 'НОВЫЙ <em>РЕКОРД</em>' : 'ПОРАЗ';
+  $('finalScore').textContent = score;
+  $('reason').textContent = reason;
+  ui.over.classList.remove('hidden'); syncHUD();
+}
+function point(e){ const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left,y:e.clientY-r.top}; }
+cv.addEventListener('pointerdown',e=>{
+  if (state!=='play') return;
+  e.preventDefault(); pointer.down=true; pointer.id=e.pointerId;
+  const p=point(e); pointer.x=pointer.px=p.x; pointer.y=pointer.py=p.y;
+  try{cv.setPointerCapture(e.pointerId);}catch(_){}
+});
+cv.addEventListener('pointermove',e=>{
+  if (!pointer.down || e.pointerId!==pointer.id || state!=='play') return;
+  e.preventDefault();
+  const p=point(e);
+  swipe(pointer.px,pointer.py,p.x,p.y);
+  pointer.px=p.x; pointer.py=p.y; pointer.x=p.x; pointer.y=p.y;
+  trails.push({x:p.x,y:p.y,life:1});
+  if (trails.length>14) trails.shift();
+});
+const endPointer=e=>{ pointer.down=false; pointer.id=null; };
+cv.addEventListener('pointerup',endPointer);
+cv.addEventListener('pointercancel',endPointer);
+window.addEventListener('blur',endPointer);
+
+document.querySelectorAll('.mode').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.mode').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); mode=b.dataset.mode; syncHUD();
+}));
+$('startBtn').addEventListener('click',startGame);
+$('againBtn').addEventListener('click',()=>{ state='menu'; ui.over.classList.add('hidden'); ui.start.classList.remove('hidden'); });
+ui.sound.addEventListener('click',()=>{ muted=!muted; ui.sound.textContent=muted?'🔇':'🔊'; if(!muted) sfx.start(); });
+window.addEventListener('resize',resize);
+document.addEventListener('visibilitychange',()=>{ if(document.hidden) endPointer(); last=performance.now(); });
+document.addEventListener('contextmenu',e=>{ if(state==='play') e.preventDefault(); });
+
+resize(); syncHUD(); requestAnimationFrame(t=>{last=t; frame(t);});
+})();
+</script>
+</body>
+</html>
